@@ -1,10 +1,10 @@
-grammar simpleC;
+grammar CCompiler;
 
 prog :(include)* (initialBlock|arrayInitBlock|structInitBlock|mStructDef|mFunction)*;
 //prog : (forBlock)*;
 
 //-------------语法规则----------------------------------------------
-include : '#include' '<' mLIB '>';
+include : '#include' '<' mHEADER '>';
 
 //结构体
 mStructDef : mStruct '{' (structParam)+ '}'';';
@@ -128,7 +128,7 @@ mCHAR : CHAR;
 mSTRING : STRING;
 
 //mLIB
-mLIB : LIB;
+mHEADER : HEADER;
 
 //-------------词法规则----------------------------------------------
 
@@ -143,7 +143,7 @@ CHAR : '\''.'\'';
 STRING : '"'.*?'"';
 
 
-LIB : [a-zA-Z]+'.h'?;
+HEADER : [a-zA-Z]+'.h'?;
 
 Conjunction : '&&' | '||';
 

@@ -142,3 +142,7 @@ cython_debug/
 
 # llvm
 *.ll
+
+# antlr generated code
+Parser/
+!Parser/*.g4
