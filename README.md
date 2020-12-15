@@ -3,7 +3,12 @@ Compile C to LLVM with Python.
 
 ## 部署方法
 
-使用 [python antlrbook](https://github.com/jszheng/py3antlr4book) 项目下的 `bin/antlr4env.bat` 脚本设置 dos 宏环境：
+首先安装必备的 python3 库：
+```shell script
+pip install -r requirements.txt
+```
+
+运行库安装后，使用 [python antlrbook](https://github.com/jszheng/py3antlr4book) 项目下的 `bin/antlr4env.bat` 脚本设置 dos 宏环境：
 ```shell script
 call <root_dir>/bin/antlr4env.bat
 ```
