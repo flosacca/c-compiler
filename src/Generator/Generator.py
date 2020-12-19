@@ -1,6 +1,8 @@
 from antlr4 import *
 from llvmlite import ir
 
+from typing import Dict, List, Union, Optional
+
 from Generator.ErrorListener import SemanticError
 from Generator.ErrorListener import SyntaxErrorListener
 from Generator.SymbolTable import SymbolTable, Structure
@@ -24,53 +26,67 @@ class Visitor(CCompilerVisitor):
         super(CCompilerVisitor, self).__init__()
 
         # 控制llvm生成
-        self.module = ir.Module()
+        self.module: ir.Module = ir.Module()
         self.module.triple = "x86_64-pc-linux-gnu"  # llvm.Target.from_default_triple()
         # llvm.create_mcjit_compiler(backing_mod, target_machine)
         self.module.data_layout = "e-m:e-i64:64-f80:128-n8:16:32:64-S128"
 
         # 语句块
-        self.blocks = []
+        self.blocks: List[ir.Block] = []
 
-        # 待生成的llvm语句块
-        self.builders = []
+        # 待生成的 llvm 语句块
+        self.builders: List[ir.IRBuilder] = []
 
         # 函数列表
         self.functions = dict()
 
         # 结构体列表
-        self.structure = Structure()
+        self.structure: Structure = Structure()
 
-        # 当前所在函数
-        self.current_function = ''
+        # 当前所在函数名
+        self.current_function: str = ''
         self.constants = 0
 
         # 这个变量是否需要加载
-        self.whether_need_load = True
+        self.whether_need_load: bool = True
 
         # endif块
         self.endif_block = None
 
         # 符号表
-        self.symbol_table = SymbolTable()
+        self.symbol_table: SymbolTable = SymbolTable()
 
-    def visitProg(self, ctx: CCompilerParser.ProgContext):
+    def visitProg(self, ctx: CCompilerParser.ProgContext) -> None:
         """
-        语法规则：prog :(include)* (initialBlock|arrayInitBlock|structInitBlock|mStructDef|mFunction)*;
-        描述：代码主文件
-        返回：无
+        代码主文件.
+
+        语法规则：
+            prog :(include)* (initialBlock | arrayInitBlock | structInitBlock | mStructDef| mFunction)*;
+
+        Args:
+            ctx (CCompilerParser.ProgContext):
+
+        Returns:
+            None
         """
         for i in range(ctx.getChildCount()):
             self.visit(ctx.getChild(i))
 
     # 结构体相关函数
-    def visitMStructDef(self, ctx: CCompilerParser.MStructContext):
+    def visitMStructDef(self, ctx: CCompilerParser.MStructContext) -> None:
         """
-        语法规则：mStructDef : mStruct '{' (structParam)+ '}'';';
-        描述：结构体定义
-        返回：无
+        结构体定义.
+
+        语法规则：
+            mStructDef : mStruct '{' (structParam)+ '}' ';';
+
+        Args:
+            ctx (CCompilerParser.MStructContext):
+
+        Returns:
+            None
         """
-        new_struct_name = ctx.getChild(0).getChild(1).getText()
+        new_struct_name: str = ctx.getChild(0).getChild(1).getText()
 
         # 遍历结构体的变量，并且存储
         i = 2
@@ -85,18 +101,26 @@ class Visitor(CCompilerVisitor):
             i += 1
 
         # 存储结构体
-        the_result = self.structure.AddItem(new_struct_name, parameter_name_list, parameter_type_list)
+        the_result = self.structure.add_item(new_struct_name, parameter_name_list, parameter_type_list)
         if the_result["result"] != "success":
             raise SemanticError(ctx=ctx, msg=the_result["reason"])
 
     def visitStructParam(self, ctx: CCompilerParser.StructParamContext):
         """
-        语法规则：structParam : (mType|mStruct) (mID|mArray) (',' (mID|mArray))* ';';
-        描述：处理一行结构体参数
-        返回：无
+        处理一行结构体参数.
+
+        语法规则：
+            structParam : (mType | mStruct) (mID | mArray) (',' (mID | mArray))* ';';
+
+        Args:
+            ctx (CCompilerParser.StructParamContext):
+
+        Returns:
+            None
         """
         parameter_type_line = []
         parameter_name_line = []
+        # TODO: 此处只支持非 struct 的变量类型
         # 必须有类型
         if ctx.getChild(0).getChildCount() == 1:
             i = 1
@@ -117,9 +141,16 @@ class Visitor(CCompilerVisitor):
 
     def visitStructInitBlock(self, ctx: CCompilerParser.StructInitBlockContext):
         """
-        语法规则：structInitBlock : mStruct (mID|mArray)';';
-        描述：结构体初始化
-        返回：无
+        结构体初始化
+
+        语法规则：
+            structInitBlock : mStruct (mID|mArray)';';
+
+        Args:
+            ctx (CCompilerParser.StructParamContext):
+
+        Returns:
+            None
         """
         variable_info = self.visit(ctx.getChild(0))
         variable_type = variable_info['type']
@@ -130,7 +161,7 @@ class Visitor(CCompilerVisitor):
             ID_name = ctx.getChild(1).getText()
             current_type = variable_type
             # 全局变量
-            if self.symbol_table.JudgeWhetherGlobal():
+            if self.symbol_table.is_global():
                 new_variable = ir.GlobalVariable(self.module, variable_type, name=ID_name)
                 new_variable.linkage = 'internal'
                 new_variable.initializer = ir.Constant(current_type, None)
@@ -145,7 +176,7 @@ class Visitor(CCompilerVisitor):
             ID_name = variable_info['ID_name']
             current_type = ir.ArrayType(variable_type, variable_info['length'])
             # 全局变量
-            if self.symbol_table.JudgeWhetherGlobal():
+            if self.symbol_table.is_global():
                 new_variable = ir.GlobalVariable(self.module, current_type, name=ID_name)
                 new_variable.linkage = 'internal'
                 new_variable.initializer = ir.Constant(current_type, None)
@@ -155,7 +186,7 @@ class Visitor(CCompilerVisitor):
 
         # 存储这个结构体变量
         the_variable = {"struct_name": struct_name, "type": current_type, "name": new_variable}
-        the_result = self.symbol_table.AddItem(ID_name, the_variable)
+        the_result = self.symbol_table.add_item(ID_name, the_variable)
         if the_result["result"] != "success":
             raise SemanticError(ctx=ctx, msg=the_result["reason"])
         return
@@ -177,10 +208,10 @@ class Visitor(CCompilerVisitor):
             # 读取结构体信息
             struct_name = struct_info['struct_name']
             father_name = struct_info["name"]
-            index = self.structure.GetMemberIndex(struct_name, ctx.getChild(2).getText())
+            index = self.structure.get_member_index(struct_name, ctx.getChild(2).getText())
             if index is None:
                 raise SemanticError(ctx=ctx, msg="未找到这个变量")
-            type = self.structure.GetMemberType(struct_name, ctx.getChild(2).getText())
+            type = self.structure.get_member_type(struct_name, ctx.getChild(2).getText())
 
             zero = ir.Constant(int32, 0)
             idx = ir.Constant(int32, index)
@@ -195,12 +226,18 @@ class Visitor(CCompilerVisitor):
             raise NotImplementedError()
 
     # 函数相关函数
-    def visitMFunction(self, ctx: CCompilerParser.MFunctionContext):
-
+    def visitMFunction(self, ctx: CCompilerParser.MFunctionContext) -> None:
         """
-        语法规则：mFunction : (mType|mVoid|mStruct) mID '(' params ')' '{' funcBody '}';
-        描述：函数的定义
-        返回：无
+        函数的定义.
+
+        语法规则:
+            mFunction : (mType|mVoid|mStruct) mID '(' params ')' '{' funcBody '}';
+
+        Args:
+            ctx (CCompilerParser.MFunctionContext):
+
+        Returns:
+            None
         """
         # 获取返回值类型
         return_type = self.visit(ctx.getChild(0))  # mtype
@@ -223,7 +260,7 @@ class Visitor(CCompilerVisitor):
             llvm_function.args[i].name = parameter_list[i]['ID_name']
 
         # 存储函数的block
-        the_block = llvm_function.append_basic_block(name=function_name + '.entry')
+        the_block: ir.Block = llvm_function.append_basic_block(name=function_name + '.entry')
 
         # 判断重定义，存储函数
         if function_name in self.functions:
@@ -231,13 +268,13 @@ class Visitor(CCompilerVisitor):
         else:
             self.functions[function_name] = llvm_function
 
-        the_builder = ir.IRBuilder(the_block)
+        the_builder: ir.IRBuilder = ir.IRBuilder(the_block)
         self.blocks.append(the_block)
         self.builders.append(the_builder)
 
         # 进一层
         self.current_function = function_name
-        self.symbol_table.EnterScope()
+        self.symbol_table.enter_scope()
 
         # 存储函数的变量
         variable_list = {}
@@ -245,7 +282,7 @@ class Visitor(CCompilerVisitor):
             new_variable = the_builder.alloca(parameter_list[i]['type'])
             the_builder.store(llvm_function.args[i], new_variable)
             the_variable = {"type": parameter_list[i]['type'], "name": new_variable}
-            the_result = self.symbol_table.AddItem(parameter_list[i]['ID_name'], the_variable)
+            the_result = self.symbol_table.add_item(parameter_list[i]['ID_name'], the_variable)
             if the_result["result"] != "success":
                 raise SemanticError(ctx=ctx, msg=the_result["reason"])
 
@@ -256,31 +293,45 @@ class Visitor(CCompilerVisitor):
         self.current_function = ''
         self.blocks.pop()
         self.builders.pop()
-        self.symbol_table.QuitScope()
+        self.symbol_table.quit_scope()
         return
 
-    def visitParams(self, ctx: CCompilerParser.ParamsContext):
+    def visitParams(self, ctx: CCompilerParser.ParamsContext) -> List[Dict[str, Union[ir.Type, str]]]:
         """
-        语法规则：params : param (','param)* |;
-        描述：函数的参数列表
-        返回：处理后的函数参数列表
+        函数的参数列表.
+
+        语法规则：
+            params : param (','param)* |;
+
+        Args:
+            ctx (CCompilerParser.ParamsContext):
+
+        Returns:
+            List[Dict[str, Union[ir.Type, str]]]: 处理后的函数参数列表
         """
         length = ctx.getChildCount()
         if length == 0:
             return []
-        parameter_list = []
+        parameter_list: List[Dict[str, Union[ir.Type, str]]] = []
         i = 0
         while i < length:
-            new_parameter = self.visit(ctx.getChild(i))
+            new_parameter: Dict[str, Union[ir.Type, str]] = self.visit(ctx.getChild(i))
             parameter_list.append(new_parameter)
             i += 2
         return parameter_list
 
-    def visitParam(self, ctx: CCompilerParser.ParamContext):
+    def visitParam(self, ctx: CCompilerParser.ParamContext) -> Dict[str, Union[ir.Type, str]]:
         """
-        语法规则：param : mType mID;
-        描述：返回函数参数
-        返回：一个字典，字典的Type是类型，Name是参数名
+        返回函数参数.
+
+        语法规则：
+            param : mType mID;
+
+        Args:
+            ctx (CCompilerParser.ParamContext):
+
+        Returns:
+            Dict[str, Union[ir.Type, str]]: 一个字典，字典的 type 是类型，name 是参数名
         """
         type = self.visit(ctx.getChild(0))
         ID_name = ctx.getChild(1).getText()
@@ -293,10 +344,10 @@ class Visitor(CCompilerVisitor):
         描述：函数体
         返回：无
         """
-        self.symbol_table.EnterScope()
+        self.symbol_table.enter_scope()
         for index in range(ctx.getChildCount()):
             self.visit(ctx.getChild(index))
-        self.symbol_table.QuitScope()
+        self.symbol_table.quit_scope()
         return
 
     def visitBody(self, ctx: CCompilerParser.BodyContext):
@@ -500,14 +551,14 @@ class Visitor(CCompilerVisitor):
         i = 1
         while i < length:
             ID_name = ctx.getChild(i).getText()
-            if self.symbol_table.JudgeWhetherGlobal():
+            if self.symbol_table.is_global():
                 new_variable = ir.GlobalVariable(self.module, parameter_type, name=ID_name)
                 new_variable.linkage = 'internal'
             else:
                 the_builder = self.builders[-1]
                 new_variable = the_builder.alloca(parameter_type, name=ID_name)
             the_variable = {"type": parameter_type, "name": new_variable}
-            the_result = self.symbol_table.AddItem(ID_name, the_variable)
+            the_result = self.symbol_table.add_item(ID_name, the_variable)
             if the_result["result"] != "success":
                 raise SemanticError(ctx=ctx, msg=the_result["reason"])
 
@@ -516,7 +567,7 @@ class Visitor(CCompilerVisitor):
             else:
                 # 初始化
                 value = self.visit(ctx.getChild(i + 2))
-                if self.symbol_table.JudgeWhetherGlobal():
+                if self.symbol_table.is_global():
                     # 全局变量
                     new_variable.initializer = ir.Constant(value['type'], value['name'].constant)
                     # print(value['name'].constant)
@@ -538,7 +589,7 @@ class Visitor(CCompilerVisitor):
         ID_name = ctx.getChild(1).getText()
         length = int(ctx.getChild(3).getText())
 
-        if self.symbol_table.JudgeWhetherGlobal():
+        if self.symbol_table.is_global():
             # 全局变量
             new_variable = ir.GlobalVariable(self.module, ir.ArrayType(type, length), name=ID_name)
             new_variable.linkage = 'internal'
@@ -547,7 +598,7 @@ class Visitor(CCompilerVisitor):
             new_variable = the_builder.alloca(ir.ArrayType(type, length), name=ID_name)
 
         the_variable = {"type": ir.ArrayType(type, length), "name": new_variable}
-        the_result = self.symbol_table.AddItem(ID_name, the_variable)
+        the_result = self.symbol_table.add_item(ID_name, the_variable)
         if the_result["result"] != "success":
             raise SemanticError(ctx=ctx, msg=the_result["reason"])
         return
@@ -561,7 +612,7 @@ class Visitor(CCompilerVisitor):
         the_builder = self.builders[-1]
         length = ctx.getChildCount()
         ID_name = ctx.getChild(0).getText()
-        if ('[' not in ID_name) and not self.symbol_table.JudgeExist(ID_name):
+        if ('[' not in ID_name) and not self.symbol_table.exist(ID_name):
             raise SemanticError(ctx=ctx, msg="变量未定义！")
 
         # 待赋值结果
@@ -637,7 +688,7 @@ class Visitor(CCompilerVisitor):
         返回：无
         """
         # 在If块中，有True和False两种可能的导向
-        self.symbol_table.EnterScope()
+        self.symbol_table.enter_scope()
         the_builder = self.builders[-1]
         true_block = the_builder.append_basic_block()
         false_block = the_builder.append_basic_block()
@@ -661,7 +712,7 @@ class Visitor(CCompilerVisitor):
         self.builders.pop()
         self.blocks.append(false_block)
         self.builders.append(ir.IRBuilder(false_block))
-        self.symbol_table.QuitScope()
+        self.symbol_table.quit_scope()
         return
 
     def visitElifBlock(self, ctx: CCompilerParser.ElifBlockContext):
@@ -671,7 +722,7 @@ class Visitor(CCompilerVisitor):
         返回：无
         """
         # 在ElseIf块中，有True和False两种可能的导向
-        self.symbol_table.EnterScope()
+        self.symbol_table.enter_scope()
         the_builder = self.builders[-1]
         true_block = the_builder.append_basic_block()
         false_block = the_builder.append_basic_block()
@@ -695,7 +746,7 @@ class Visitor(CCompilerVisitor):
         self.builders.pop()
         self.blocks.append(false_block)
         self.builders.append(ir.IRBuilder(false_block))
-        self.symbol_table.QuitScope()
+        self.symbol_table.quit_scope()
         return
 
     def visitElseBlock(self, ctx: CCompilerParser.ElseBlockContext):
@@ -705,9 +756,9 @@ class Visitor(CCompilerVisitor):
         返回：无
         """
         # Else分块直接处理body内容
-        self.symbol_table.EnterScope()
+        self.symbol_table.enter_scope()
         self.visit(ctx.getChild(2))  # body
-        self.symbol_table.QuitScope()
+        self.symbol_table.quit_scope()
         return
 
     def visitWhileBlock(self, ctx: CCompilerParser.WhileBlockContext):
@@ -716,7 +767,7 @@ class Visitor(CCompilerVisitor):
         描述：while语句块
         返回：无
         """
-        self.symbol_table.EnterScope()
+        self.symbol_table.enter_scope()
         the_builder = self.builders[-1]
         # while语句分为三个分块
         while_condition = the_builder.append_basic_block()
@@ -749,7 +800,7 @@ class Visitor(CCompilerVisitor):
         self.builders.pop()
         self.blocks.append(while_end)
         self.builders.append(ir.IRBuilder(while_end))
-        self.symbol_table.QuitScope()
+        self.symbol_table.quit_scope()
         return
 
     def visitForBlock(self, ctx: CCompilerParser.ForBlockContext):
@@ -758,7 +809,7 @@ class Visitor(CCompilerVisitor):
         描述：for语句块
         返回：无
         """
-        self.symbol_table.EnterScope()
+        self.symbol_table.enter_scope()
 
         # for循环首先初始化局部变量
         self.visit(ctx.getChild(2))
@@ -798,7 +849,7 @@ class Visitor(CCompilerVisitor):
         self.builders.pop()
         self.blocks.append(for_end)
         self.builders.append(ir.IRBuilder(for_end))
-        self.symbol_table.QuitScope()
+        self.symbol_table.quit_scope()
         return
 
     def visitFor1Block(self, ctx: CCompilerParser.For1BlockContext):
@@ -893,60 +944,60 @@ class Visitor(CCompilerVisitor):
     def convertIIZ(self, calc_index, DType):
         builder = self.builders[-1]
         confirmed_val = builder.zext(calc_index['name'], DType)
-        judge_reg = False
+        is_constant = False
         return {
             'type': DType,
-            'const': judge_reg,
+            'const': is_constant,
             'name': confirmed_val
         }
 
     def convertIIS(self, calc_index, DType):
         builder = self.builders[-1]
         confirmed_val = builder.sext(calc_index['name'], DType)
-        judge_reg = False
+        is_constant = False
         return {
             'type': DType,
-            'const': judge_reg,
+            'const': is_constant,
             'name': confirmed_val
         }
 
     def convertDIS(self, calc_index, DType):
         builder = self.builders[-1]
         confirmed_val = builder.fptosi(calc_index['name'], DType)
-        judge_reg = False
+        is_constant = False
         return {
             'type': DType,
-            'const': judge_reg,
+            'const': is_constant,
             'name': confirmed_val
         }
 
     def convertDIU(self, calc_index, DType):
         builder = self.builders[-1]
         confirmed_val = builder.fptoui(calc_index['name'], DType)
-        judge_reg = False
+        is_constant = False
         return {
             'type': DType,
-            'const': judge_reg,
+            'const': is_constant,
             'name': confirmed_val
         }
 
     def convertIDS(self, calc_index):
         builder = self.builders[-1]
         confirmed_val = builder.sitofp(calc_index['name'], double)
-        judge_reg = False
+        is_constant = False
         return {
             'type': double,
-            'const': judge_reg,
+            'const': is_constant,
             'name': confirmed_val
         }
 
     def convertIDU(self, calc_index):
         builder = self.builders[-1]
-        judge_reg = False
+        is_constant = False
         confirmed_val = builder.uitofp(calc_index['name'], double)
         return {
             'type': double,
-            'const': judge_reg,
+            'const': is_constant,
             'name': confirmed_val
         }
 
@@ -1014,11 +1065,11 @@ class Visitor(CCompilerVisitor):
         index2 = self.visit(ctx.getChild(2))
         index2 = self.toBoolean(index2, notFlag=False)
         builder = self.builders[-1]
-        judge_reg = False
+        is_constant = False
         real_return_value = builder.and_(index1['name'], index2['name'])
         return {
             'type': index1['type'],
-            'const': judge_reg,
+            'const': is_constant,
             'name': real_return_value
         }
 
@@ -1092,7 +1143,7 @@ class Visitor(CCompilerVisitor):
         index1 = self.visit(ctx.getChild(0))
         index2 = self.visit(ctx.getChild(2))
         index1, index2 = self.exprConvert(index1, index2)
-        judge_reg = False
+        is_constant = False
         if ctx.getChild(1).getText() == '*':
             real_return_value = builder.mul(index1['name'], index2['name'])
         elif ctx.getChild(1).getText() == '/':
@@ -1101,7 +1152,7 @@ class Visitor(CCompilerVisitor):
             real_return_value = builder.srem(index1['name'], index2['name'])
         return {
             'type': index1['type'],
-            'const': judge_reg,
+            'const': is_constant,
             'name': real_return_value
         }
 
@@ -1115,14 +1166,14 @@ class Visitor(CCompilerVisitor):
         index1 = self.visit(ctx.getChild(0))
         index2 = self.visit(ctx.getChild(2))
         index1, index2 = self.exprConvert(index1, index2)
-        judge_reg = False
+        is_constant = False
         if ctx.getChild(1).getText() == '+':
             real_return_value = builder.add(index1['name'], index2['name'])
         elif ctx.getChild(1).getText() == '-':
             real_return_value = builder.sub(index1['name'], index2['name'])
         return {
             'type': index1['type'],
-            'const': judge_reg,
+            'const': is_constant,
             'name': real_return_value
         }
 
@@ -1204,24 +1255,32 @@ class Visitor(CCompilerVisitor):
         index2 = self.visit(ctx.getChild(2))
         index1, index2 = self.exprConvert(index1, index2)
         operation_char = ctx.getChild(1).getText()
-        judge_reg = False
+        is_constant = False
         if index1['type'] == double:
             real_return_value = builder.fcmp_ordered(operation_char, index1['name'], index2['name'])
         elif self.isInteger(index1['type']):
             real_return_value = builder.icmp_signed(operation_char, index1['name'], index2['name'])
         return {
             'type': int1,
-            'const': judge_reg,
+            'const': is_constant,
             'name': real_return_value
         }
 
     # 变量和变量类型相关函数
-    def visitMType(self, ctx: CCompilerParser.MTypeContext):
+    def visitMType(self, ctx: CCompilerParser.MTypeContext) -> ir.Type:
         """
-        语法规则：mType : 'int'| 'double'| 'char'| 'string';
-        描述：类型主函数
-        返回：无
+        类型主函数.
+
+        语法规则：
+            mType : 'int'| 'double'| 'char'| 'string';
+
+        Args:
+            ctx (CCompilerParser.MTypeContext):
+
+        Returns:
+            ir.Type: 变量类型
         """
+        # TODO: 为什么会有 string 类型返回，而且此处未实现？
         if ctx.getText() == 'int':
             return int32
         if ctx.getText() == 'char':
@@ -1240,7 +1299,7 @@ class Visitor(CCompilerVisitor):
         self.whether_need_load = False
         res = self.visit(ctx.getChild(0))  # mID
         # print("res is", res)
-        judge_reg = False
+        is_constant = False
         self.whether_need_load = temp_require_load
 
         if isinstance(res['type'], ir.types.ArrayType):
@@ -1257,7 +1316,7 @@ class Visitor(CCompilerVisitor):
                 real_return_value = builder.load(real_return_value)
             return {
                 'type': res['type'].element,
-                'const': judge_reg,
+                'const': is_constant,
                 'name': real_return_value,
                 'struct_name': res['struct_name'] if 'struct_name' in res else None
             }
@@ -1272,98 +1331,141 @@ class Visitor(CCompilerVisitor):
         """
         return self.visit(ctx.getChild(0))
 
-    def visitMStruct(self, ctx: CCompilerParser.MStructContext):
+    def visitMStruct(self, ctx: CCompilerParser.MStructContext) -> Dict[str, Union[List[str], ir.LiteralStructType]]:
         """
-        语法规则：mStruct : 'struct' mID;
-        描述：结构体类型变量的使用
-        返回：无
+        结构体类型变量的使用.
+
+        语法规则：
+            mStruct : 'struct' mID;
+
+        Args:
+            ctx (CCompilerParser.MStructContext):
+
+        Returns:
+             Dict[str, Union[List[str], ir.LiteralStructType]]:
+                {"Members": member_list, "Type": ir.LiteralStructType(type_list)}
         """
-        return self.structure.List[ctx.getChild(1).getText()]
+        return self.structure.list[ctx.getChild(1).getText()]
 
     def visitMID(self, ctx: CCompilerParser.MIDContext):
         """
-        语法规则：mID : ID;
-        描述：ID
-        返回：无
+        ID 处理.
+
+        语法规则：
+            mID : ID;
+
+        Args:
+            ctx (CCompilerParser.MIDContext):
+
+        Returns:
+
         """
         ID_name = ctx.getText()
-        judge_reg = False
-        if not self.symbol_table.JudgeExist(ID_name):
+        is_constant = False
+        if not self.symbol_table.exist(ID_name):
             return {
                 'type': int32,
-                'const': judge_reg,
+                'const': is_constant,
                 'name': ir.Constant(int32, None)
             }
         builder = self.builders[-1]
-        the_item = self.symbol_table.GetItem(ID_name)
+        the_item = self.symbol_table.get_item(ID_name)
         # print(the_item)
         if the_item is not None:
             if self.whether_need_load:
                 return_value = builder.load(the_item["name"])
                 return {
                     "type": the_item["type"],
-                    "const": judge_reg,
+                    "const": is_constant,
                     "name": return_value,
                     "struct_name": the_item["struct_name"] if "struct_name" in the_item else None
                 }
             else:
                 return {
                     "type": the_item["type"],
-                    "const": judge_reg,
+                    "const": is_constant,
                     "name": the_item["name"],
                     "struct_name": the_item["struct_name"] if "struct_name" in the_item else None
                 }
         else:
             return {
                 'type': void,
-                'const': judge_reg,
+                'const': is_constant,
                 'name': ir.Constant(void, None)
             }
 
     def visitMINT(self, ctx: CCompilerParser.MINTContext):
         """
-        语法规则：mINT : INT;
-        描述：int
-        返回：无
+        int 类型处理.
+
+        语法规则：
+            mINT : INT;
+
+        Args:
+            ctx (CCompilerParser.MINTContext):
+
+        Returns:
+
         """
-        judge_reg = True
+        is_constant = True
         return {
             'type': int32,
-            'const': judge_reg,
+            'const': is_constant,
             'name': ir.Constant(int32, int(ctx.getText()))
         }
 
     def visitMDOUBLE(self, ctx: CCompilerParser.MDOUBLEContext):
         """
-        语法规则：mDOUBLE : DOUBLE;
-        描述：double
-        返回：无
+        double 类型处理.
+
+        语法规则：
+            mDOUBLE : DOUBLE;
+
+        Args:
+            ctx (CCompilerParser.MDOUBLEContext):
+
+        Returns:
+
         """
-        judge_reg = True
+        is_constant = True
         return {
             'type': double,
-            'const': judge_reg,
+            'const': is_constant,
             'name': ir.Constant(double, float(ctx.getText()))
         }
 
     def visitMCHAR(self, ctx: CCompilerParser.MCHARContext):
         """
-        语法规则：mCHAR : CHAR;
-        描述：char
-        返回：无
+        char 类型处理.
+
+        语法规则：
+            mCHAR : CHAR;
+
+        Args:
+            ctx (CCompilerParser.MCHARContext):
+
+        Returns:
+
         """
-        judge_reg = True
+        is_constant = True
         return {
             'type': int8,
-            'const': judge_reg,
+            'const': is_constant,
             'name': ir.Constant(int8, ord(ctx.getText()[1]))
         }
 
     def visitMSTRING(self, ctx: CCompilerParser.MSTRINGContext):
         """
-        语法规则：mSTRING : STRING;
-        描述：string
-        返回：无
+        string 类型处理.
+
+        语法规则：
+            mSTRING : STRING;
+
+        Args:
+            ctx (CCompilerParser.MSTRINGContext):
+
+        Returns:
+
         """
         mark_index = self.constants
         self.constants += 1
@@ -1371,27 +1473,31 @@ class Visitor(CCompilerVisitor):
         process_index = process_index[1:-1]
         process_index += '\0'
         length = len(bytearray(process_index, 'utf-8'))
-        judge_reg = False
+        is_constant = False
         real_return_value = ir.GlobalVariable(self.module, ir.ArrayType(int8, length), ".str%d" % mark_index)
         real_return_value.global_constant = True
         real_return_value.initializer = ir.Constant(ir.ArrayType(int8, length), bytearray(process_index, 'utf-8'))
         return {
             'type': ir.ArrayType(int8, length),
-            'const': judge_reg,
+            'const': is_constant,
             'name': real_return_value
         }
 
-    def save(self, filename):
+    def save(self, filename: str) -> None:
         """
-        保存到文件
-        描述：文件名含后缀
-        返回：无
+        保存分析结果到文件.
+
+        Args:
+            filename (str): 文件名含后缀
+
+        Returns:
+            None
         """
         with open(filename, "w") as f:
             f.write(repr(self.module))
 
 
-def generate(input_filename, output_filename):
+def generate(input_filename: str, output_filename: str):
     """
     将C代码文件转成IR代码文件
     :param input_filename: C代码文件

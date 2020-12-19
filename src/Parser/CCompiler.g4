@@ -1,19 +1,19 @@
 grammar CCompiler;
 
-prog :(include)* (initialBlock|arrayInitBlock|structInitBlock|mStructDef|mFunction)*;
+prog :(include)* (initialBlock | arrayInitBlock | structInitBlock | mStructDef | mFunction)*;
 //prog : (forBlock)*;
 
 //-------------语法规则----------------------------------------------
 include : '#include' '<' mHEADER '>';
 
-//结构体
+// 结构体定义
 mStructDef : mStruct '{' (structParam)+ '}'';';
 
-//结构体中参数
-structParam : (mType|mStruct) (mID|mArray) (',' (mID|mArray))* ';';
+// 结构体中参数定义
+structParam : (mType | mStruct) (mID | mArray) (',' (mID | mArray))* ';';
 
 //函数
-mFunction : (mType|mVoid|mStruct) mID '(' params ')' '{' funcBody '}';
+mFunction : (mType | mVoid | mStruct) mID '(' params ')' '{' funcBody '}';
 
 //函数参数
 params : param (','param)* |;
@@ -31,7 +31,7 @@ block : initialBlock | arrayInitBlock | structInitBlock | assignBlock | ifBlocks
 //初始化语句
 initialBlock : (mType) mID ('=' expr)? (',' mID ('=' expr)?)* ';';
 arrayInitBlock : mType mID '[' mINT ']'';'; 
-structInitBlock : mStruct (mID|mArray)';';
+structInitBlock : mStruct (mID | mArray)';';
 
 
 //赋值语句
@@ -75,7 +75,7 @@ expr
     | func                       #function                                     
     ;
 
-mType : 'int'| 'double'| 'char'| 'string';
+mType : 'int' | 'double' | 'char' | 'string';
 
 mArray : mID '[' mINT ']'; 
 
@@ -102,13 +102,13 @@ printfFunc
     : 'printf' '(' (mSTRING | mID) (','expr)* ')';
 
 //scanf
-scanfFunc : 'scanf' '(' mSTRING (','('&')?(mID|arrayItem|structMember))* ')';
+scanfFunc : 'scanf' '(' mSTRING (','('&')?(mID | arrayItem | structMember))* ')';
 
 //gets
 getsFunc : 'gets' '(' mID ')';
 
 //Selfdefined
-selfDefinedFunc : mID '('((argument|mID)(','(argument|mID))*)? ')';
+selfDefinedFunc : mID '('((argument | mID)(','(argument | mID))*)? ')';
 
 argument : mINT | mDOUBLE | mCHAR | mSTRING;
 
@@ -143,7 +143,7 @@ CHAR : '\''.'\'';
 STRING : '"'.*?'"';
 
 
-HEADER : [a-zA-Z]+'.h'?;
+HEADER : [a-zA-Z]+ '.h'?;
 
 Conjunction : '&&' | '||';
 
