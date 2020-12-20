@@ -1,0 +1,40 @@
+# 修改此处地址
+ANTLRJAR = <...>\antlr-4.9-complete.jar
+ANTLRFLAG = -cp $(ANTLRJAR) org.antlr.v4.Tool -Dlanguage=Python3 -no-listener -visitor
+SRC_DIR = src
+PREPROCESS_DIR = $(SRC_DIR)/_cpreprocess
+PARSER_DIR = $(SRC_DIR)/cparser
+TEST_DIR = $(SRC_DIR)/test
+
+all: parser preprocessor
+
+.PHONY: parser preprocessor testall
+
+parser:
+	java $(ANTLRFLAG) $(PARSER_DIR)/CCompiler.g4 -o $(PARSER_DIR)/
+
+preprocessor:
+	java $(ANTLRFLAG) $(PREPROCESS_DIR)/CPreprocessor.g4 -o $(PREPROCESS_DIR)/
+
+testall:
+	python3 $(SRC_DIR)/compile_all.py
+
+.PHONY: clean
+clean:
+ifeq ($(OS),Windows_NT)
+	@del $(subst /,\,$(PARSER_DIR))\*.interp
+	@del $(subst /,\,$(PARSER_DIR))\*.tokens
+	@del $(subst /,\,$(PARSER_DIR))\CCompiler*.py
+	@del $(subst /,\,$(PREPROCESS_DIR))\*.interp
+	@del $(subst /,\,$(PREPROCESS_DIR))\*.tokens
+	@del $(subst /,\,$(PREPROCESS_DIR))\CPreprocessor*.py
+	@del $(subst /,\,$(TEST_DIR))\*.ll
+else
+	rm -f $(PARSER_DIR)/*.interp
+	rm -f $(PARSER_DIR)/*.tokens
+	rm -f $(PARSER_DIR)/CCompiler*.py
+	rm -f $(PREPROCESS_DIR)/*.interp
+	rm -f $(PREPROCESS_DIR)/*.tokens
+	rm -f $(PREPROCESS_DIR)/CPreprocessor*.py
+	rm -f $(TEST_DIR)/*.ll
+endif

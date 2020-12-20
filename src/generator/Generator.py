@@ -6,9 +6,9 @@ from typing import Dict, List, Union, Optional, Tuple, Any
 from generator.ErrorListener import SemanticError
 from generator.ErrorListener import SyntaxErrorListener
 from generator.SymbolTable import SymbolTable, Structure
-from parser.CCompilerLexer import CCompilerLexer
-from parser.CCompilerParser import CCompilerParser
-from parser.CCompilerVisitor import CCompilerVisitor
+from cparser.CCompilerLexer import CCompilerLexer
+from cparser.CCompilerParser import CCompilerParser
+from cparser.CCompilerVisitor import CCompilerVisitor
 
 double = ir.DoubleType()
 int1 = ir.IntType(1)

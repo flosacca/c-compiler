@@ -150,9 +150,9 @@ cython_debug/
 [Mm]akefile
 
 # antlr generated code
-[Pp]arser/
-![Pp]arser/*.g4
-![Pp]arser/__init__.py
-_preprocess/
-!_preprocess/*.g4
-!_preprocess/__init__.py
+cparser/
+!cparser/*.g4
+!cparser/__init__.py
+_cpreprocess/
+!_cpreprocess/*.g4
+!_cpreprocess/__init__.py
