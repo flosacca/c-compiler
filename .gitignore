@@ -144,7 +144,10 @@ cython_debug/
 *.ll
 
 # idea
-.idea
+.idea/
+
+# vscode
+.vscode/
 
 # makefile
 [Mm]akefile
