@@ -1,14 +1,14 @@
 from antlr4 import *
 from llvmlite import ir
 
-from typing import Dict, List, Union, Optional
+from typing import Dict, List, Union, Optional, Any
 
-from Generator.ErrorListener import SemanticError
-from Generator.ErrorListener import SyntaxErrorListener
-from Generator.SymbolTable import SymbolTable, Structure
-from Parser.CCompilerLexer import CCompilerLexer
-from Parser.CCompilerParser import CCompilerParser
-from Parser.CCompilerVisitor import CCompilerVisitor
+from generator.ErrorListener import SemanticError
+from generator.ErrorListener import SyntaxErrorListener
+from generator.SymbolTable import SymbolTable, Structure
+from parser.CCompilerLexer import CCompilerLexer
+from parser.CCompilerParser import CCompilerParser
+from parser.CCompilerVisitor import CCompilerVisitor
 
 double = ir.DoubleType()
 int1 = ir.IntType(1)
@@ -191,11 +191,18 @@ class Visitor(CCompilerVisitor):
             raise SemanticError(ctx=ctx, msg=the_result["reason"])
         return
 
-    def visitStructMember(self, ctx: CCompilerParser.StructMemberContext):
+    def visitStructMember(self, ctx: CCompilerParser.StructMemberContext) -> Dict[str, Union[Optional[str], Any]]:
         """
-        语法规则：structMember: (mID | arrayItem)'.' mID;
-        描述：获取结构体成员变量信息
-        返回：无
+        获取结构体成员变量信息.
+
+        语法规则：
+            structMember: (mID | arrayItem)'.'(mID | arrayItem);
+
+        Args:
+            ctx (CCompilerParser.StructMemberContext):
+
+        Returns:
+            Dict[str, Union[Optional[str], Any]]
         """
         the_builder = self.builders[-1]
         # 处理成员元素是单一变量的情况，TODO g4修改后删除
@@ -248,7 +255,7 @@ class Visitor(CCompilerVisitor):
         # 获取参数列表
         parameter_list = self.visit(ctx.getChild(3))  # func params
 
-        # 根据返回值，函数名称和参数生成llvm函数
+        # 根据返回值，函数名称和参数生成 llvm 函数
         parameter_type_list = []
         for i in range(len(parameter_list)):
             parameter_type_list.append(parameter_list[i]['type'])
@@ -501,11 +508,18 @@ class Visitor(CCompilerVisitor):
         result = {'type': int32, 'name': return_variable_name}
         return result
 
-    def visitSelfDefinedFunc(self, ctx: CCompilerParser.SelfDefinedFuncContext):
+    def visitSelfDefinedFunc(self, ctx: CCompilerParser.SelfDefinedFuncContext) -> Dict[str, ir.CallInstr]:
         """
-        语法规则：selfDefinedFunc : mID '('((argument|mID)(','(argument|mID))*)? ')';
-        描述：自定义函数
-        返回：函数返回值
+        自定义函数.
+
+        语法规则：
+            selfDefinedFunc : mID '('((argument | mID)(','(argument | mID))*)? ')';
+
+        Args:
+            ctx (CCompilerParser.SelfDefinedFuncContext):
+
+        Returns:
+            Dict[str, CallInstr]: 函数返回值
         """
         the_builder = self.builders[-1]
         function_name = ctx.getChild(0).getText()  # func name

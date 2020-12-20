@@ -1,6 +1,6 @@
 import sys
 
-from Generator.Generator import generate
+from generator.Generator import generate
 
 if __name__ == '__main__':
     if len(sys.argv) >= 2:

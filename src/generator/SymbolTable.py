@@ -1,6 +1,6 @@
 from llvmlite import ir
 
-from Generator.Constants import Constants
+from generator.Constants import Constants
 from typing import Dict, List, Union, Optional
 
 

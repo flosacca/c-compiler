@@ -1,6 +1,6 @@
 import os
 
-from Generator.Generator import generate
+from generator.Generator import generate
 
 print(os.getcwd())
 c_files = []

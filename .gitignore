@@ -143,6 +143,16 @@ cython_debug/
 # llvm
 *.ll
 
+# idea
+.idea
+
+# makefile
+[Mm]akefile
+
 # antlr generated code
-Parser/
-!Parser/*.g4
+[Pp]arser/
+![Pp]arser/*.g4
+![Pp]arser/__init__.py
+_preprocess/
+!_preprocess/*.g4
+!_preprocess/__init__.py

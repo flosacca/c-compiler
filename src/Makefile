@@ -1,0 +1,36 @@
+# 修改此处地址
+ANTLRJAR = H:\github\py3antlr4book\bin\antlr-4.9-complete.jar
+ANTLRFLAG = -cp $(ANTLRJAR) org.antlr.v4.Tool -Dlanguage=Python3 -no-listener -visitor
+PREPROCESS_DIR = _preprocess
+PARSER_DIR = parser
+
+all: parser preprocessor
+
+.PHONY: parser preprocessor run
+
+parser:
+	java $(ANTLRFLAG) $(PARSER_DIR)/CCompiler.g4 -o parser/
+
+preprocessor:
+	java $(ANTLRFLAG) $(PREPROCESS_DIR)/CPreprocessor.g4 -o $(PREPROCESS_DIR)/
+
+run:
+	python3 compile_all.py
+
+.PHONY: clean
+clean:
+ifeq ($(OS),Windows_NT)
+	@del $(PARSER_DIR)\*.interp
+	@del $(PARSER_DIR)\*.tokens
+	@del $(PARSER_DIR)\CCompiler*.py
+	@del $(PREPROCESS_DIR)\*.interp
+	@del $(PREPROCESS_DIR)\*.tokens
+	@del $(PREPROCESS_DIR)\CPreprocessor*.py
+else
+	rm -f $(PARSER_DIR)/*.interp
+	rm -f $(PARSER_DIR)/*.tokens
+	rm -f $(PARSER_DIR)/CCompiler*.py
+	rm -f $(PREPROCESS_DIR)/*.interp
+	rm -f $(PREPROCESS_DIR)/*.tokens
+	rm -f $(PREPROCESS_DIR)/CPreprocessor*.py
+endif
