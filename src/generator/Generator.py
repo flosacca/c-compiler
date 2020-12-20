@@ -1,7 +1,7 @@
 from antlr4 import *
 from llvmlite import ir
 
-from typing import Dict, List, Union, Optional, Any
+from typing import Dict, List, Union, Optional, Tuple, Any
 
 from generator.ErrorListener import SemanticError
 from generator.ErrorListener import SyntaxErrorListener
@@ -37,8 +37,8 @@ class Visitor(CCompilerVisitor):
         # 待生成的 llvm 语句块
         self.builders: List[ir.IRBuilder] = []
 
-        # 函数列表
-        self.functions = dict()
+        # 函数列表 Dict[名称, 是否有定义]
+        self.functions: Dict[str, ir.Function] = dict()
 
         # 结构体列表
         self.structure: Structure = Structure()
@@ -233,23 +233,29 @@ class Visitor(CCompilerVisitor):
             raise NotImplementedError()
 
     # 函数相关函数
-    def visitMFunction(self, ctx: CCompilerParser.MFunctionContext) -> None:
+    def visitMFunctionType(self, ctx: CCompilerParser.MFunctionTypeContext) \
+            -> Tuple[ir.FunctionType, str, List[Dict[str, Union[str, ir.Type]]]]:
         """
-        函数的定义.
+        函数的类型.
 
         语法规则:
-            mFunction : (mType|mVoid|mStruct) mID '(' params ')' '{' funcBody '}';
+            mFunctionType: (mType | mVoid | mStruct) mID '(' params ')';
 
         Args:
-            ctx (CCompilerParser.MFunctionContext):
+            ctx (CCompilerParser.MFunctionTypeContext):
 
         Returns:
-            None
+            Tuple
+             - ir.FunctionType 函数类型
+             - str 函数名
+             - List 函数参数
         """
+        children_count = ctx.getChildCount()
+
         # 获取返回值类型
         return_type = self.visit(ctx.getChild(0))  # mtype
 
-        # 获取函数名 todo
+        # 获取函数名
         function_name = ctx.getChild(1).getText()  # func name
 
         # 获取参数列表
@@ -260,43 +266,88 @@ class Visitor(CCompilerVisitor):
         for i in range(len(parameter_list)):
             parameter_type_list.append(parameter_list[i]['type'])
         llvm_function_type = ir.FunctionType(return_type, parameter_type_list)
-        llvm_function = ir.Function(self.module, llvm_function_type, name=function_name)
+        return llvm_function_type, function_name, parameter_list
 
-        # 存储函数的变量
-        for i in range(len(parameter_list)):
-            llvm_function.args[i].name = parameter_list[i]['ID_name']
+    def visitMFunctionDeclaration(self, ctx:CCompilerParser.MFunctionDeclarationContext) -> None:
+        """
+        函数的声明.
 
-        # 存储函数的block
-        the_block: ir.Block = llvm_function.append_basic_block(name=function_name + '.entry')
+        语法规则:
+            mFunctionDeclaration : mFunctionType ';';
+
+        Args:
+            ctx (CCompilerParser.MFunctionDeclarationContext):
+
+        Returns:
+            None
+        """
+        function_type: ir.FunctionType
+        function_name: str
+        parameter_list: List[Dict[str, Union[str, ir.Type]]]
+        function_type, function_name, parameter_list = self.visit(ctx.getChild(0))
+        # 存入符号表
+        if function_name in self.functions:
+            llvm_function = self.functions[function_name]
+            if llvm_function.function_type != function_type:
+                raise SemanticError(ctx=ctx, msg="函数类型与先前的定义冲突: " + function_name)
+        else:
+            self.functions[function_name] = ir.Function(self.module, function_type, name=function_name)
+
+    def visitMFunctionDefinition(self, ctx: CCompilerParser.MFunctionDefinitionContext) -> None:
+        """
+        函数的定义.
+
+        语法规则:
+            mFunctionDefinition : mFunctionType '{' funcBody '}';
+
+        Args:
+            ctx (CCompilerParser.MFunctionDefinitionContext):
+
+        Returns:
+            None
+        """
+        function_type: ir.FunctionType
+        function_name: str
+        parameter_list: List[Dict[str, Union[str, ir.Type]]]
+        function_type, function_name, parameter_list = self.visit(ctx.getChild(0))
 
         # 判断重定义，存储函数
         if function_name in self.functions:
-            raise SemanticError(ctx=ctx, msg="函数重定义错误！")
+            llvm_function = self.functions[function_name]
+            if len(llvm_function.blocks) > 0:
+                raise SemanticError(ctx=ctx, msg="函数重定义: " + function_name)
         else:
-            self.functions[function_name] = llvm_function
+            llvm_function = ir.Function(self.module, function_type, name=function_name)
 
-        the_builder: ir.IRBuilder = ir.IRBuilder(the_block)
+        # 函数的参数名
+        for i in range(len(parameter_list)):
+            llvm_function.args[i].name = parameter_list[i]['ID_name']
+
+        # 函数 block
+        the_block: ir.Block = llvm_function.append_basic_block(name=function_name + '.entry')
+        self.functions[function_name] = llvm_function
+
+        ir_builder: ir.IRBuilder = ir.IRBuilder(the_block)
         self.blocks.append(the_block)
-        self.builders.append(the_builder)
+        self.builders.append(ir_builder)
 
-        # 进一层
+        # 进入函数作用域
         self.current_function = function_name
         self.symbol_table.enter_scope()
 
         # 存储函数的变量
-        variable_list = {}
         for i in range(len(parameter_list)):
-            new_variable = the_builder.alloca(parameter_list[i]['type'])
-            the_builder.store(llvm_function.args[i], new_variable)
-            the_variable = {"type": parameter_list[i]['type'], "name": new_variable}
-            the_result = self.symbol_table.add_item(parameter_list[i]['ID_name'], the_variable)
-            if the_result["result"] != "success":
-                raise SemanticError(ctx=ctx, msg=the_result["reason"])
+            func_arg = llvm_function.args[i]
+            variable = ir_builder.alloca(func_arg.type)
+            ir_builder.store(func_arg, variable)
+            result = self.symbol_table.add_item(func_arg.name, {"type": func_arg.type, "name": variable})
+            if result["result"] != "success":
+                raise SemanticError(ctx=ctx, msg=result["reason"])
 
-        # 处理函数body
-        self.visit(ctx.getChild(6))  # func body
+        # 处理函数体
+        self.visit(ctx.getChild(2))  # funcBody
 
-        # 处理完毕，退一层
+        # 处理完毕，退出函数作用域
         self.current_function = ''
         self.blocks.pop()
         self.builders.pop()
@@ -538,7 +589,7 @@ class Visitor(CCompilerVisitor):
             result = {'type': the_function.function_type.return_type, 'name': return_variable_name}
             return result
         else:
-            raise SemanticError(ctx=ctx, msg="函数未定义！")
+            raise SemanticError(ctx=ctx, msg="未找到函数声明: " + function_name)
 
     # 语句块相关函数
     def visitBlock(self, ctx: CCompilerParser.BlockContext):
