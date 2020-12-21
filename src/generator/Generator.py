@@ -134,7 +134,7 @@ class Visitor(CCompilerVisitor):
                 # 处理mArray的情况（数组）
                 else:
                     array_info = self.visit(ctx.getChild(i))
-                    parameter_name_line.append(array_info['ID_name'])
+                    parameter_name_line.append(array_info['id_name'])
                     parameter_type_line.append(ir.ArrayType(parameter_type, array_info['length']))
                 i = i + 2
             return parameter_type_line, parameter_name_line
@@ -158,35 +158,35 @@ class Visitor(CCompilerVisitor):
 
         # 处理结构体变量是单一变量的情况
         if ctx.getChild(1).getChildCount() == 1:
-            ID_name = ctx.getChild(1).getText()
+            id_name = ctx.getChild(1).getText()
             current_type = variable_type
             # 全局变量
             if self.symbol_table.is_global():
-                new_variable = ir.GlobalVariable(self.module, variable_type, name=ID_name)
+                new_variable = ir.GlobalVariable(self.module, variable_type, name=id_name)
                 new_variable.linkage = 'internal'
                 new_variable.initializer = ir.Constant(current_type, None)
             # 局部变量
             else:
                 the_builder = self.builders[-1]
-                new_variable = the_builder.alloca(current_type, name=ID_name)
+                new_variable = the_builder.alloca(current_type, name=id_name)
 
         # 处理结构体变量是数组的情况
         else:
             variable_info = self.visit(ctx.getChild(1))
-            ID_name = variable_info['ID_name']
+            id_name = variable_info['id_name']
             current_type = ir.ArrayType(variable_type, variable_info['length'])
             # 全局变量
             if self.symbol_table.is_global():
-                new_variable = ir.GlobalVariable(self.module, current_type, name=ID_name)
+                new_variable = ir.GlobalVariable(self.module, current_type, name=id_name)
                 new_variable.linkage = 'internal'
                 new_variable.initializer = ir.Constant(current_type, None)
             else:
                 the_builder = self.builders[-1]
-                new_variable = the_builder.alloca(current_type, name=ID_name)
+                new_variable = the_builder.alloca(current_type, name=id_name)
 
         # 存储这个结构体变量
         the_variable = {"struct_name": struct_name, "type": current_type, "name": new_variable}
-        the_result = self.symbol_table.add_item(ID_name, the_variable)
+        the_result = self.symbol_table.add_item(id_name, the_variable)
         if the_result["result"] != "success":
             raise SemanticError(ctx=ctx, msg=the_result["reason"])
         return
@@ -259,13 +259,13 @@ class Visitor(CCompilerVisitor):
         function_name = ctx.getChild(1).getText()  # func name
 
         # 获取参数列表
-        parameter_list = self.visit(ctx.getChild(3))  # func params
+        parameter_list, varargs = self.visit(ctx.getChild(3))  # func params
 
         # 根据返回值，函数名称和参数生成 llvm 函数
         parameter_type_list = []
         for i in range(len(parameter_list)):
             parameter_type_list.append(parameter_list[i]['type'])
-        llvm_function_type = ir.FunctionType(return_type, parameter_type_list)
+        llvm_function_type = ir.FunctionType(return_type, parameter_type_list, var_arg=varargs)
         return llvm_function_type, function_name, parameter_list
 
     def visitMFunctionDeclaration(self, ctx:CCompilerParser.MFunctionDeclarationContext) -> None:
@@ -321,7 +321,7 @@ class Visitor(CCompilerVisitor):
 
         # 函数的参数名
         for i in range(len(parameter_list)):
-            llvm_function.args[i].name = parameter_list[i]['ID_name']
+            llvm_function.args[i].name = parameter_list[i]['id_name']
 
         # 函数 block
         the_block: ir.Block = llvm_function.append_basic_block(name=function_name + '.entry')
@@ -354,36 +354,59 @@ class Visitor(CCompilerVisitor):
         self.symbol_table.quit_scope()
         return
 
-    def visitParams(self, ctx: CCompilerParser.ParamsContext) -> List[Dict[str, Union[ir.Type, str]]]:
+    def visitParams(self, ctx: CCompilerParser.ParamsContext) -> Tuple[List[Dict[str, Union[ir.Type, str]]], bool]:
         """
         函数的参数列表.
 
         语法规则：
-            params : param (','param)* |;
+            params : (param (','param)* |) ('...')?;
 
         Args:
             ctx (CCompilerParser.ParamsContext):
 
         Returns:
             List[Dict[str, Union[ir.Type, str]]]: 处理后的函数参数列表
+            bool: 是否有 vararg
         """
         length = ctx.getChildCount()
+        varargs = False
         if length == 0:
-            return []
+            return [], varargs
+        if ctx.getChild(length - 1).getText() == '...':
+            varargs = True
+            length -= 1
         parameter_list: List[Dict[str, Union[ir.Type, str]]] = []
         i = 0
         while i < length:
             new_parameter: Dict[str, Union[ir.Type, str]] = self.visit(ctx.getChild(i))
             parameter_list.append(new_parameter)
             i += 2
-        return parameter_list
+        return parameter_list, varargs
+
+    def visitNamedValue(self, ctx: CCompilerParser.NamedValueContext) -> Dict[str, Union[ir.Type, str]]:
+        """
+        返回具名值.
+
+        语法规则：
+            namedValue : mType mID;
+
+        Args:
+            ctx (CCompilerParser.NamedValueContext):
+
+        Returns:
+            Dict[str, Union[ir.Type, str]]: 一个字典，字典的 type 是类型，name 是参数名
+        """
+        value_type = self.visit(ctx.getChild(0))
+        id_name = ctx.getChild(1).getText()
+        result = {'type': value_type, 'id_name': id_name}
+        return result
 
     def visitParam(self, ctx: CCompilerParser.ParamContext) -> Dict[str, Union[ir.Type, str]]:
         """
         返回函数参数.
 
         语法规则：
-            param : mType mID;
+            param : namedValue;
 
         Args:
             ctx (CCompilerParser.ParamContext):
@@ -391,10 +414,7 @@ class Visitor(CCompilerVisitor):
         Returns:
             Dict[str, Union[ir.Type, str]]: 一个字典，字典的 type 是类型，name 是参数名
         """
-        type = self.visit(ctx.getChild(0))
-        ID_name = ctx.getChild(1).getText()
-        result = {'type': type, 'ID_name': ID_name}
-        return result
+        return self.visit(ctx.getChild(0))
 
     def visitFuncBody(self, ctx: CCompilerParser.FuncBodyContext):
         """
@@ -575,18 +595,25 @@ class Visitor(CCompilerVisitor):
         the_builder = self.builders[-1]
         function_name = ctx.getChild(0).getText()  # func name
         if function_name in self.functions:
-            the_function = self.functions[function_name]
+            func = self.functions[function_name]
 
             length = ctx.getChildCount()
             parameter_list = []
+            func_arg_count = len(func.args)
             i = 2
+            arg_index = 0
             while i < length - 1:
-                the_parameter = self.visit(ctx.getChild(i))
-                the_parameter = self.assignConvert(the_parameter, the_function.args[i // 2 - 1].type)
-                parameter_list.append(the_parameter['name'])
+                param = self.visit(ctx.getChild(i))
+                if arg_index >= func_arg_count:
+                    if not func.function_type.var_arg:
+                        raise SemanticError(ctx=ctx, msg="参数数量不匹配")
+                else:
+                    param = self.assignConvert(param, func.args[arg_index].type)
+                parameter_list.append(param['name'])
+                arg_index += 1
                 i += 2
-            return_variable_name = the_builder.call(the_function, parameter_list)
-            result = {'type': the_function.function_type.return_type, 'name': return_variable_name}
+            return_variable_name = the_builder.call(func, parameter_list)
+            result = {'type': func.function_type.return_type, 'name': return_variable_name}
             return result
         else:
             raise SemanticError(ctx=ctx, msg="未找到函数声明: " + function_name)
@@ -615,15 +642,15 @@ class Visitor(CCompilerVisitor):
 
         i = 1
         while i < length:
-            ID_name = ctx.getChild(i).getText()
+            id_name = ctx.getChild(i).getText()
             if self.symbol_table.is_global():
-                new_variable = ir.GlobalVariable(self.module, parameter_type, name=ID_name)
+                new_variable = ir.GlobalVariable(self.module, parameter_type, name=id_name)
                 new_variable.linkage = 'internal'
             else:
                 the_builder = self.builders[-1]
-                new_variable = the_builder.alloca(parameter_type, name=ID_name)
+                new_variable = the_builder.alloca(parameter_type, name=id_name)
             the_variable = {"type": parameter_type, "name": new_variable}
-            the_result = self.symbol_table.add_item(ID_name, the_variable)
+            the_result = self.symbol_table.add_item(id_name, the_variable)
             if the_result["result"] != "success":
                 raise SemanticError(ctx=ctx, msg=the_result["reason"])
 
@@ -651,19 +678,19 @@ class Visitor(CCompilerVisitor):
         返回：无
         """
         type = self.visit(ctx.getChild(0))
-        ID_name = ctx.getChild(1).getText()
+        id_name = ctx.getChild(1).getText()
         length = int(ctx.getChild(3).getText())
 
         if self.symbol_table.is_global():
             # 全局变量
-            new_variable = ir.GlobalVariable(self.module, ir.ArrayType(type, length), name=ID_name)
+            new_variable = ir.GlobalVariable(self.module, ir.ArrayType(type, length), name=id_name)
             new_variable.linkage = 'internal'
         else:
             the_builder = self.builders[-1]
-            new_variable = the_builder.alloca(ir.ArrayType(type, length), name=ID_name)
+            new_variable = the_builder.alloca(ir.ArrayType(type, length), name=id_name)
 
         the_variable = {"type": ir.ArrayType(type, length), "name": new_variable}
-        the_result = self.symbol_table.add_item(ID_name, the_variable)
+        the_result = self.symbol_table.add_item(id_name, the_variable)
         if the_result["result"] != "success":
             raise SemanticError(ctx=ctx, msg=the_result["reason"])
         return
@@ -676,8 +703,8 @@ class Visitor(CCompilerVisitor):
         """
         the_builder = self.builders[-1]
         length = ctx.getChildCount()
-        ID_name = ctx.getChild(0).getText()
-        if ('[' not in ID_name) and not self.symbol_table.exist(ID_name):
+        id_name = ctx.getChild(0).getText()
+        if ('[' not in id_name) and not self.symbol_table.exist(id_name):
             raise SemanticError(ctx=ctx, msg="变量未定义！")
 
         # 待赋值结果
@@ -1305,7 +1332,7 @@ class Visitor(CCompilerVisitor):
         返回：无
         """
         return {
-            'ID_name': ctx.getChild(0).getText(),
+            'id_name': ctx.getChild(0).getText(),
             'length': int(ctx.getChild(2).getText())
         }
 
@@ -1425,16 +1452,16 @@ class Visitor(CCompilerVisitor):
         Returns:
 
         """
-        ID_name = ctx.getText()
+        id_name = ctx.getText()
         is_constant = False
-        if not self.symbol_table.exist(ID_name):
+        if not self.symbol_table.exist(id_name):
             return {
                 'type': int32,
                 'const': is_constant,
                 'name': ir.Constant(int32, None)
             }
         builder = self.builders[-1]
-        the_item = self.symbol_table.get_item(ID_name)
+        the_item = self.symbol_table.get_item(id_name)
         # print(the_item)
         if the_item is not None:
             if self.whether_need_load:
