@@ -20,8 +20,10 @@ mFunctionDefinition : mFunctionType '{' funcBody '}';
 mFunctionDeclaration : mFunctionType ';';
 
 // 函数参数
-params : param (','param)* |;
-param : mType mID;
+params : (param (','param)* (',' '...')? | ('...')?);
+param : namedValue;
+
+namedValue : mType mID;
 
 // 函数体
 funcBody : body returnBlock;
