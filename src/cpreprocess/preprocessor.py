@@ -198,6 +198,10 @@ def preprocess(filepath: str, include_dirs: List[str], macro_define_list: Option
 
     Returns:
         str: 预处理后的文本
+
+    Raises:
+        MacroError:
+            宏处理的错误
     """
     lexer = CPreprocessorLexer(FileStream(filepath))
     stream = CommonTokenStream(lexer)
