@@ -8,6 +8,18 @@ Compile C to LLVM with Python.
 pip install -r requirements.txt
 ```
 
+### 使用 Makefile 启动（推荐）
+生成 parser：
+```shell script
+make parser
+```
+
+生成 preprocessor：
+```shell script
+make preprocessor
+```
+
+### 通过 antlrbook 启动（可选）
 运行库安装后，使用 [python antlrbook](https://github.com/jszheng/py3antlr4book) 项目下的 `bin/antlr4env.bat` 脚本设置 dos 宏环境：
 ```shell script
 call <root_dir>/bin/antlr4env.bat

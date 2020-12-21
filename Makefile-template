@@ -1,6 +1,6 @@
 # 修改此处地址
 ANTLRJAR = <...>\antlr-4.9-complete.jar
-ANTLRFLAG = -cp $(ANTLRJAR) org.antlr.v4.Tool -Dlanguage=Python3 -no-listener -visitor
+ANTLRFLAG = -cp $(ANTLRJAR) org.antlr.v4.Tool -Dlanguage=Python3 -visitor
 SRC_DIR = src
 PREPROCESS_DIR = $(SRC_DIR)/_cpreprocess
 PARSER_DIR = $(SRC_DIR)/cparser

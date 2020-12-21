@@ -5,45 +5,49 @@ macro
     ;
 
 line
-    : defineStat
-    | includeStat
-    | ifdefStat
-    | ifndefStat
-    | elseStat
-    | endifStat
-    | text
-    |   // 空行
+    : defineStat    // 定义宏
+    | undefStat     // 取消宏
+    | includeStat   // 包含头文件
+    | ifdefStat     // ifdef
+    | ifndefStat    // ifndef
+    | elseStat      // else
+    | endifStat     // endif
+    | text          // 普通文本
+    |               // 空行
     ;
 
 defineStat
-    : '#define' macroID restOfLine?;
+    : WS? '#define' WS macroID restOfLine?;
+
+undefStat
+    : WS? '#undef' WS macroID WS?;
 
 includeStat
-    : '#include' '"' filename '"'   # includeCur
-    | '#include' '<' filename '>'   # includeSys
+    : WS? '#include' WS '"' WS? filename WS? '"' WS?   # includeCur
+    | WS? '#include' WS '<' WS? filename WS? '>' WS?   # includeSys
     ;
 filename: ID '.h'?;
 
 ifdefStat
-    : '#ifdef' macroID;
+    : WS? '#ifdef' WS macroID WS?;
 
 ifndefStat
-    : '#ifndef' macroID;
+    : WS? '#ifndef' WS macroID WS?;
 
 elseStat
-    : '#else';
+    : WS? '#else' WS?;
 
 endifStat
-    : '#endif';
+    : WS? '#endif' WS?;
 
-text: (ID | OP)+;
+text: (WS | ID | OP)+;
 
 macroID: ID | OP;
 
-restOfLine: (ID | OP)+;
+restOfLine: (WS? (ID | OP) WS?)+;
 
 ID: [A-Za-z0-9_]+;
 OP: (~('a'..'z' | 'A'..'Z' | '0'..'9' | '\t' | '\r' | '\n' | ' ' | '_'))+;
 
 NL          : '\r'? '\n';
-WS          : (' ' | '\t')-> skip; // toss out whitespace
+WS          : (' ' | '\t')+; // whitespace
