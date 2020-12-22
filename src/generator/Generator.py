@@ -268,7 +268,7 @@ class Visitor(CCompilerVisitor):
         llvm_function_type = ir.FunctionType(return_type, parameter_type_list, var_arg=varargs)
         return llvm_function_type, function_name, parameter_list
 
-    def visitMFunctionDeclaration(self, ctx:CCompilerParser.MFunctionDeclarationContext) -> None:
+    def visitMFunctionDeclaration(self, ctx: CCompilerParser.MFunctionDeclarationContext) -> None:
         """
         函数的声明.
 
@@ -603,7 +603,10 @@ class Visitor(CCompilerVisitor):
             i = 2
             arg_index = 0
             while i < length - 1:
+                prev_need_load = self.whether_need_load
+                self.whether_need_load = True
                 param = self.visit(ctx.getChild(i))
+                self.whether_need_load = prev_need_load
                 if arg_index >= func_arg_count:
                     if not func.function_type.var_arg:
                         raise SemanticError(ctx=ctx, msg="参数数量不匹配")
@@ -1030,7 +1033,7 @@ class Visitor(CCompilerVisitor):
         elif self.isInteger(calc_index['type']) and DType == double:
             calc_index = self.convertIDS(calc_index)
         elif self.isInteger(DType) and calc_index['type'] == double:
-            calc_index = self.convertDIS(calc_index)
+            calc_index = self.convertDIS(calc_index, DType)
         return calc_index
 
     def convertIIZ(self, calc_index, DType):
@@ -1102,20 +1105,33 @@ class Visitor(CCompilerVisitor):
             operation_char = '!='
         if manipulate_index['type'] == int8 or manipulate_index['type'] == int32:
             real_return_value = builder.icmp_signed(operation_char, manipulate_index['name'],
-                                                  ir.Constant(manipulate_index['type'], 0))
+                                                    ir.Constant(manipulate_index['type'], 0))
             return {
-                'tpye': int1,
+                'type': int1,
                 'const': False,
                 'name': real_return_value
             }
         elif manipulate_index['type'] == double:
             real_return_value = builder.fcmp_ordered(operation_char, manipulate_index['name'], ir.Constant(double, 0))
             return {
-                'tpye': int1,
+                'type': int1,
                 'const': False,
                 'name': real_return_value
             }
         return manipulate_index
+
+    def arrayDecay(self, array_ptr, pointer_type: ir.PointerType):
+        """
+        将数组指针退化为指针
+        """
+        assert array_ptr.pointee.element == pointer_type.pointee
+        arr = self.builders[-1].gep(array_ptr, [ir.Constant(int32, 0), ir.Constant(int32, 0)], inbounds=True)
+        is_constant = False
+        return {
+            'type': pointer_type,
+            'const': is_constant,
+            'name': arr,
+        }
 
     def visitNeg(self, ctx: CCompilerParser.NegContext):
         """
@@ -1181,13 +1197,83 @@ class Visitor(CCompilerVisitor):
         """
         return self.visit(ctx.getChild(1))
 
-    def visitArrayitem(self, ctx: CCompilerParser.ArrayitemContext):
+    def visitAddressOf(self, ctx: CCompilerParser.AddressOfContext):
         """
-        语法规则：expr : arrayItem
+        语法规则：expr : '&' expr
+        描述：取地址
+        返回：无
+        """
+        builder = self.builders[-1]
+        # 保证 expr 部分在内存上
+        prev_need_load = self.whether_need_load
+        self.whether_need_load = False
+        index1 = self.visit(ctx.getChild(1))
+        self.whether_need_load = prev_need_load
+        ptr_type: ir.Type = index1['name'].type
+        if not ptr_type.is_pointer:
+            raise SemanticError(ctx=ctx, msg="不是合法的左值")
+        is_constant = False
+        return {
+            'type': ptr_type,
+            'const': is_constant,
+            'name': index1['name']
+        }
+
+    def visitDereference(self, ctx: CCompilerParser.DereferenceContext):
+        """
+        语法规则：expr : '*' expr
+        描述：取内容
+        返回：无
+        """
+        builder = self.builders[-1]
+        index1 = self.visit(ctx.getChild(1))
+        ptr = builder.load(index1['name'])
+        is_constant = False
+        return {
+            'type': ptr.type,
+            'const': is_constant,
+            'name': ptr
+        }
+
+    def visitArrayIndex(self, ctx: CCompilerParser.ArrayIndexContext):
+        """
+        语法规则：expr : expr '[' expr ']'
         描述：数组元素
         返回：无
         """
-        return self.visit(ctx.getChild(0))
+        temp_require_load = self.whether_need_load
+        self.whether_need_load = False
+        arr = self.visit(ctx.getChild(0))  # array / pointer
+        is_constant = False
+        self.whether_need_load = temp_require_load
+
+        is_pointer = isinstance(arr['type'], ir.types.PointerType)
+        is_array = isinstance(arr['type'], ir.types.ArrayType)
+
+        if is_array | is_pointer:
+            builder = self.builders[-1]
+            temp_require_load = self.whether_need_load
+            self.whether_need_load = True
+            index_re1 = self.visit(ctx.getChild(2))  # subscript
+            self.whether_need_load = temp_require_load
+
+            if is_pointer:
+                # 如果是指针，需要 load 进来
+                ptr = builder.load(arr['name'])
+                real_return_value = builder.gep(ptr, [index_re1['name']], inbounds=False)
+            else:
+                int32_zero = ir.Constant(int32, 0)
+                real_return_value = builder.gep(arr['name'], [int32_zero, index_re1['name']], inbounds=True)
+            if self.whether_need_load:
+                real_return_value = builder.load(real_return_value)
+            return {
+                'type': arr['type'].element if is_array else arr['type'].pointee,
+                'const': is_constant,
+                'name': real_return_value,
+                'struct_name': arr['struct_name'] if 'struct_name' in arr else None
+            }
+        else:  # error!
+            raise SemanticError(ctx=ctx, msg="类型错误")
 
     def visitString(self, ctx: CCompilerParser.StringContext):
         """
@@ -1197,9 +1283,18 @@ class Visitor(CCompilerVisitor):
         """
         return self.visit(ctx.getChild(0))
 
-    def isInteger(self, typ):
+    @staticmethod
+    def isInteger(typ):
         return_value = 'width'
         return hasattr(typ, return_value)
+
+    @staticmethod
+    def isArray(typ):
+        return isinstance(typ['type'], ir.ArrayType)
+
+    @staticmethod
+    def isPointer(typ):
+        return isinstance(typ, ir.PointerType)
 
     def exprConvert(self, index1, index2):
         if index1['type'] == index2['type']:
@@ -1364,7 +1459,7 @@ class Visitor(CCompilerVisitor):
         类型主函数.
 
         语法规则：
-            mType : 'int'| 'double'| 'char'| 'string';
+            mType : mBaseType pointer?;
 
         Args:
             ctx (CCompilerParser.MTypeContext):
@@ -1372,25 +1467,110 @@ class Visitor(CCompilerVisitor):
         Returns:
             ir.Type: 变量类型
         """
-        # TODO: 为什么会有 string 类型返回，而且此处未实现？
-        if ctx.getText() == 'int':
+        base_type: ir.Type = self.visit(ctx.getChild(0))
+        if ctx.getChildCount() > 1:
+            # 指针类型信息
+            pointers: List[Dict[str, bool]] = self.visit(ctx.getChild(1))
+            pointers.reverse()
+            for _ in pointers:
+                base_type: ir.PointerType = base_type.as_pointer()
+        return base_type
+
+    def visitMBaseType(self, ctx: CCompilerParser.MBaseTypeContext) -> ir.Type:
+        """
+        基础类型
+
+        语法规则：
+            mBaseType : ('int' | 'double' | 'char')
+
+        Args:
+            ctx (CCompilerParser.MBaseTypeContext):
+
+        Returns:
+            ir.Type 基础类型
+        """
+        base_type = ctx.getText()
+        if base_type == 'int':
             return int32
-        if ctx.getText() == 'char':
+        if base_type == 'char':
             return int8
-        if ctx.getText() == 'double':
+        if base_type == 'double':
             return double
         return void
 
+    def visitQualifiedPointer(self, ctx: CCompilerParser.QualifiedPointerContext) -> Dict[str, bool]:
+        """
+        指针修饰符
+
+        语法规则：
+            pointer : '*' typeQualifierList?
+
+        Args:
+            ctx (CCompilerParser.QualifiedPointerContext):
+
+        Returns:
+            {
+                "const": bool 是否为 const
+                "volatile": bool 是否为 volatile
+            }
+        """
+        qualifiers = []
+        if ctx.getChildCount() > 1:
+            qualifiers = self.visit(ctx.getChild(1))
+        return {
+            "const": "const" in qualifiers,
+            "volatile": "volatile" in qualifiers,
+        }
+
+    def visitPointer(self, ctx: CCompilerParser.PointerContext) -> List[Dict[str, bool]]:
+        """
+        指针修饰符列表
+
+        语法规则：
+            pointer : qualifiedPointer | pointer qualifiedPointer
+
+        Args:
+            ctx (CCompilerParser.PointerContext):
+
+        Returns:
+            {
+                "const": bool 是否为 const
+                "volatile": bool 是否为 volatile
+            }[]
+        """
+        if ctx.getChildCount() > 1:
+            pointers: List[Dict[str, bool]] = self.visit(ctx.getChild(0))
+            pointers.append(self.visit(ctx.getChild(1)))
+            return pointers
+        else:
+            return [self.visit(ctx.getChild(0))]
+
+    def visitTypeQualifierList(self, ctx: CCompilerParser.TypeQualifierListContext):
+        """
+        指针修饰符
+
+        语法规则：
+            pointer : '*' typeQualifierList?
+
+        Args:
+            ctx (CCompilerParser.QualifiedPointerContext):
+
+        Returns:
+            {
+                "const": bool 是否为 const
+                "volatile": bool 是否为 volatile
+            }
+        """
+
     def visitArrayItem(self, ctx: CCompilerParser.ArrayItemContext):
         """
-        语法规则：expr : arrayItem
+        语法规则：arrayItem : mID '[' expr ']';
         描述：数组元素
         返回：无
         """
         temp_require_load = self.whether_need_load
         self.whether_need_load = False
         res = self.visit(ctx.getChild(0))  # mID
-        # print("res is", res)
         is_constant = False
         self.whether_need_load = temp_require_load
 

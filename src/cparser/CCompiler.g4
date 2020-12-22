@@ -65,14 +65,16 @@ returnBlock : 'return' (mINT|mID)? ';';
 
 expr
     : '(' expr ')'               #parens
+    | structMember               #structmember
+    | expr '[' expr ']'          #arrayIndex
     | op='!' expr                   #Neg
+    | op='&' expr                #addressOf
+    | op='*' expr                #dereference
     | expr op=('*' | '/' | '%') expr   #MulDiv 
     | expr op=('+' | '-') expr   #AddSub
     | expr op=('==' | '!=' | '<' | '<=' | '>' | '>=') expr #Judge
     | expr '&&' expr             # AND
     | expr '||' expr             # OR
-    | arrayItem                  #arrayitem
-    | structMember               #structmember
     | (op='-')? mINT             #int                          
     | (op='-')? mDOUBLE          #double
     | mCHAR                       #char
@@ -81,7 +83,15 @@ expr
     | func                       #function                                     
     ;
 
-mType : 'int' | 'double' | 'char' | 'string';
+mType : mBaseType pointer?;
+mBaseType : ('int' | 'double' | 'char');
+
+pointer : qualifiedPointer | pointer qualifiedPointer;
+qualifiedPointer : '*' typeQualifierList?;
+
+typeQualifierList : typeQualifier | typeQualifierList typeQualifier;
+
+typeQualifier : 'const' | 'volatile';
 
 mArray : mID '[' mINT ']'; 
 
