@@ -36,7 +36,7 @@ block : initialBlock | arrayInitBlock | structInitBlock | assignBlock | ifBlocks
 
 // 初始化语句
 initialBlock : (mType) mID ('=' expr)? (',' mID ('=' expr)?)* ';';
-arrayInitBlock : mType mID '[' mINT ']'';'; 
+arrayInitBlock : mType mID '[' mINT ']'';';
 structInitBlock : mStruct (mID | mArray)';';
 
 
@@ -63,24 +63,148 @@ for3Block : mID '=' expr (',' for3Block)?|;
 // return 语句
 returnBlock : 'return' (mINT|mID)? ';';
 
-expr
-    : '(' expr ')'               #parens
-    | structMember               #structmember
-    | expr '[' expr ']'          #arrayIndex
-    | op='!' expr                   #Neg
-    | op='&' expr                #addressOf
-    | op='*' expr                #dereference
-    | expr op=('*' | '/' | '%') expr   #MulDiv 
-    | expr op=('+' | '-') expr   #AddSub
-    | expr op=('==' | '!=' | '<' | '<=' | '>' | '>=') expr #Judge
-    | expr '&&' expr             # AND
-    | expr '||' expr             # OR
-    | (op='-')? mINT             #int                          
-    | (op='-')? mDOUBLE          #double
-    | mCHAR                       #char
-    | mSTRING                     #string             
-    | mID                         #identifier   
-    | func                       #function                                     
+/* expr */
+/*     : '(' expr ')'               #parens */
+/*     | structMember               #structmember */
+/*     | expr '[' expr ']'          #arrayIndex */
+/*     | op='!' expr                   #Neg */
+/*     | op='&' expr                #addressOf */
+/*     | op='*' expr                #dereference */
+/*     | expr op=('*' | '/' | '%') expr   #MulDiv */
+/*     | expr op=('+' | '-') expr   #AddSub */
+/*     | expr op=('==' | '!=' | '<' | '<=' | '>' | '>=') expr #Judge */
+/*     | expr '&&' expr             # AND */
+/*     | expr '||' expr             # OR */
+/*     | (op='-')? mINT             #int */
+/*     | (op='-')? mDOUBLE          #double */
+/*     | mCHAR                       #char */
+/*     | mSTRING                     #string */
+/*     | mID                         #identifier */
+/*     | func                       #function */
+/*     ; */
+
+expr : expression ;
+
+primaryExpression
+    :   Identifier
+    |   Constant
+    |   StringLiteral+
+    |   '(' expression ')'
+    ;
+
+postfixExpression
+    :   primaryExpression
+    |   postfixExpression '[' expression ']' #subscript
+    |   postfixExpression '(' argumentExpressionList? ')' #functionCall
+    |   postfixExpression '.' Identifier #memberOfObject
+    |   postfixExpression '->' Identifier #memberOfPointer
+    |   postfixExpression '++' #postfixIncrement
+    |   postfixExpression '--' #postfixDecrement
+    ;
+
+argumentExpressionList
+    :   assignmentExpression
+    |   argumentExpressionList ',' assignmentExpression
+    ;
+
+unaryExpression
+    :   postfixExpression
+    |   '++' unaryExpression
+    |   '--' unaryExpression
+    |   unaryOperator castExpression
+    |   'sizeof' unaryExpression
+    |   'sizeof' '(' typeName ')'
+    ;
+
+unaryOperator
+    :   '&' | '*' | '+' | '-' | '~' | '!'
+    ;
+
+castExpression
+    :   '(' typeName ')' castExpression
+    |   unaryExpression
+    /* |   DigitSequence // for */
+    ;
+
+multiplicativeExpression
+    :   castExpression
+    |   multiplicativeExpression '*' castExpression
+    |   multiplicativeExpression '/' castExpression
+    |   multiplicativeExpression '%' castExpression
+    ;
+
+additiveExpression
+    :   multiplicativeExpression
+    |   additiveExpression '+' multiplicativeExpression
+    |   additiveExpression '-' multiplicativeExpression
+    ;
+
+shiftExpression
+    :   additiveExpression
+    |   shiftExpression '<<' additiveExpression
+    |   shiftExpression '>>' additiveExpression
+    ;
+
+relationalExpression
+    :   shiftExpression
+    |   relationalExpression '<' shiftExpression
+    |   relationalExpression '>' shiftExpression
+    |   relationalExpression '<=' shiftExpression
+    |   relationalExpression '>=' shiftExpression
+    ;
+
+equalityExpression
+    :   relationalExpression
+    |   equalityExpression '==' relationalExpression
+    |   equalityExpression '!=' relationalExpression
+    ;
+
+andExpression
+    :   equalityExpression
+    |   andExpression '&' equalityExpression
+    ;
+
+exclusiveOrExpression
+    :   andExpression
+    |   exclusiveOrExpression '^' andExpression
+    ;
+
+inclusiveOrExpression
+    :   exclusiveOrExpression
+    |   inclusiveOrExpression '|' exclusiveOrExpression
+    ;
+
+logicalAndExpression
+    :   inclusiveOrExpression
+    |   logicalAndExpression '&&' inclusiveOrExpression
+    ;
+
+logicalOrExpression
+    :   logicalAndExpression
+    |   logicalOrExpression '||' logicalAndExpression
+    ;
+
+conditionalExpression
+    :   logicalOrExpression ('?' expression ':' conditionalExpression)?
+    ;
+
+assignmentExpression
+    :   conditionalExpression
+    |   unaryExpression assignmentOperator assignmentExpression
+    /* |   DigitSequence // for */
+    ;
+
+assignmentOperator
+    :   '=' | '*=' | '/=' | '%=' | '+=' | '-=' | '<<=' | '>>=' | '&=' | '^=' | '|='
+    ;
+
+expression
+    :   assignmentExpression
+    |   expression ',' assignmentExpression
+    ;
+
+constantExpression
+    :   conditionalExpression
     ;
 
 mType : mBaseType pointer?;
@@ -93,7 +217,7 @@ typeQualifierList : typeQualifier | typeQualifierList typeQualifier;
 
 typeQualifier : 'const' | 'volatile';
 
-mArray : mID '[' mINT ']'; 
+mArray : mID '[' mINT ']';
 
 mVoid : 'void';
 
@@ -114,7 +238,7 @@ strlenFunc : 'strlen' '(' mID ')';
 atoiFunc : 'atoi' '(' mID ')' ;
 
 //printf
-printfFunc 
+printfFunc
     : 'printf' '(' (mSTRING | mID) (','expr)* ')';
 
 //scanf
@@ -128,22 +252,16 @@ selfDefinedFunc : mID '('((argument | mID)(','(argument | mID))*)? ')';
 
 argument : mINT | mDOUBLE | mCHAR | mSTRING;
 
-//mID
 mID : ID;
 
-//mINT
 mINT : INT;
 
-//mDOUBLE
 mDOUBLE : DOUBLE;
 
-//mCHAR
 mCHAR : CHAR;
 
-//mSTRING
 mSTRING : STRING;
 
-//mLIB
 mHEADER : HEADER;
 
 //-------------词法规则----------------------------------------------
@@ -173,3 +291,37 @@ BlockComment:  '/*'.*?'*/'  -> skip;
 
 WS : [ \t\r\n]+ -> skip ; // skip spaces, tabs, newlines
 
+// New Lexical Elements --------------------------------
+
+Digit : [0-9] ;
+
+DigitSequence : Digit+ ;
+
+Nondigit : [a-zA-Z_] ;
+
+Identifer : Nondigit (Nondigit | Digit)* ;
+
+Constant
+  : IntegerConstant
+  | FloatingConstant
+  | CharacterConstant
+  ;
+
+IntegerConstant
+  : [1-9] Digit*
+  | '0'
+  /* | '0' [0-7]* */
+  /* | ('0x' | '0X') [0-9a-fA-F]+ */
+  ;
+
+FloatingConstant
+  : DigitSequence '.' DigitSequence
+  ;
+
+CharacterConstant
+  : '\'' . '\''
+  ;
+
+StringLiteral
+  : '"' .* '"'
+  ;
