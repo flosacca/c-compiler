@@ -63,43 +63,51 @@ for3Block : mID '=' expr (',' for3Block)?|;
 // return 语句
 returnBlock : 'return' (mINT|mID)? ';';
 
-/* expr */
-/*     : '(' expr ')'               #parens */
-/*     | structMember               #structmember */
-/*     | expr '[' expr ']'          #arrayIndex */
-/*     | op='!' expr                   #Neg */
-/*     | op='&' expr                #addressOf */
-/*     | op='*' expr                #dereference */
-/*     | expr op=('*' | '/' | '%') expr   #MulDiv */
-/*     | expr op=('+' | '-') expr   #AddSub */
-/*     | expr op=('==' | '!=' | '<' | '<=' | '>' | '>=') expr #Judge */
-/*     | expr '&&' expr             # AND */
-/*     | expr '||' expr             # OR */
-/*     | (op='-')? mINT             #int */
-/*     | (op='-')? mDOUBLE          #double */
-/*     | mCHAR                       #char */
-/*     | mSTRING                     #string */
-/*     | mID                         #identifier */
-/*     | func                       #function */
-/*     ; */
+expr
+    : '(' expr ')'                                         # parens
+    | structMember                                         # structmember
+    | expr '[' expr ']'                                    # arrayIndex
+    | op='!' expr                                          # Neg
+    | op='&' expr                                          # addressOf
+    | op='*' expr                                          # dereference
+    | expr op=('*' | '/' | '%') expr                       # MulDiv
+    | expr op=('+' | '-') expr                             # AddSub
+    | expr op=('==' | '!=' | '<' | '<=' | '>' | '>=') expr # Judge
+    | expr '&&' expr                                       # AND
+    | expr '||' expr                                       # OR
+    | (op='-')? mINT                                       # int
+    | (op='-')? mDOUBLE                                    # double
+    | mCHAR                                                # char
+    | mSTRING                                              # string
+    | mID                                                  # identifier
+    | func                                                 # function
+    ;
 
-expr : expression ;
+// New syntax {{{
+// Not implemented
+// expr : expression ;
 
 primaryExpression
     :   Identifier
-    |   Constant
+    |   constant
     |   StringLiteral+
     |   '(' expression ')'
     ;
 
+constant
+    : IntegerConstant
+    | FloatingConstant
+    | CharacterConstant
+    ;
+
 postfixExpression
     :   primaryExpression
-    |   postfixExpression '[' expression ']' #subscript
-    |   postfixExpression '(' argumentExpressionList? ')' #functionCall
-    |   postfixExpression '.' Identifier #memberOfObject
-    |   postfixExpression '->' Identifier #memberOfPointer
-    |   postfixExpression '++' #postfixIncrement
-    |   postfixExpression '--' #postfixDecrement
+    |   postfixExpression '[' expression ']' //subscript
+    |   postfixExpression '(' argumentExpressionList? ')' //functionCall
+    |   postfixExpression '.' Identifier //memberOfObject
+    |   postfixExpression '->' Identifier //memberOfPointer
+    |   postfixExpression '++' //postfixIncrement
+    |   postfixExpression '--' //postfixDecrement
     ;
 
 argumentExpressionList
@@ -123,7 +131,6 @@ unaryOperator
 castExpression
     :   '(' typeName ')' castExpression
     |   unaryExpression
-    /* |   DigitSequence // for */
     ;
 
 multiplicativeExpression
@@ -191,7 +198,6 @@ conditionalExpression
 assignmentExpression
     :   conditionalExpression
     |   unaryExpression assignmentOperator assignmentExpression
-    /* |   DigitSequence // for */
     ;
 
 assignmentOperator
@@ -206,6 +212,11 @@ expression
 constantExpression
     :   conditionalExpression
     ;
+
+// The full definition is quite complex
+typeName : Identifier pointer?;
+
+// }}} New syntax
 
 mType : mBaseType pointer?;
 mBaseType : ('int' | 'double' | 'char');
@@ -231,97 +242,95 @@ arrayItem : mID '[' expr ']';
 //函数
 func : (strlenFunc | atoiFunc | printfFunc | scanfFunc | getsFunc | selfDefinedFunc);
 
-//strlen
 strlenFunc : 'strlen' '(' mID ')';
 
-//atoi
 atoiFunc : 'atoi' '(' mID ')' ;
 
-//printf
-printfFunc
-    : 'printf' '(' (mSTRING | mID) (','expr)* ')';
+printfFunc : 'printf' '(' (mSTRING | mID) (','expr)* ')';
 
-//scanf
 scanfFunc : 'scanf' '(' mSTRING (','('&')?(mID | arrayItem | structMember))* ')';
 
-//gets
 getsFunc : 'gets' '(' mID ')';
 
-//Selfdefined
 selfDefinedFunc : mID '('((argument | mID)(','(argument | mID))*)? ')';
 
 argument : mINT | mDOUBLE | mCHAR | mSTRING;
 
-mID : ID;
 
-mINT : INT;
+mID : Identifier;
 
-mDOUBLE : DOUBLE;
+mINT : IntegerConstant;
 
-mCHAR : CHAR;
+mDOUBLE : FloatingConstant;
 
-mSTRING : STRING;
+mCHAR : CharacterConstant;
+
+mSTRING : StringLiteral;
 
 mHEADER : HEADER;
 
-//-------------词法规则----------------------------------------------
 
-ID : [a-zA-Z_][0-9A-Za-z_]*;
+// Lexer rules
 
-INT : [0-9]+;
+Identifier : Nondigit (Nondigit | Digit)* ;
 
-DOUBLE : [0-9]+'.'[0-9]+;
+fragment
+Nondigit : [a-zA-Z_] ;
 
-CHAR : '\''.'\'';
+fragment
+Digit : [0-9] ;
 
-STRING : '"'.*?'"';
+IntegerConstant
+    : [1-9] Digit*
+    | '0'
+    // | '0' [0-7]*
+    // | ('0x' | '0X') [0-9a-fA-F]+
+    ;
 
+FloatingConstant
+    : DigitSequence '.' DigitSequence
+    ;
+
+fragment
+DigitSequence : Digit+ ;
+
+CharacterConstant
+    : '\'' . '\''
+    ;
+
+StringLiteral
+    : '"' .*? '"'
+    ;
 
 HEADER : [a-zA-Z]+ '.h'?;
 
-Conjunction : '&&' | '||';
+Punctuator
+    : '[' | ']' | '(' | ')' | '{' | '}' | '.' | '->'
+    | '++' | '--' | '&' | '*' | '+' | '-' | '~' | '!'
+    | '/' | '%' | '<<' | '>>' | '<' | '>' | '<=' | '>=' | '==' | '!=' | '^' | '|' | '&&' | '||'
+    | '?' | ':' | ';' | '...'
+    | '=' | '*=' | '/=' | '%=' | '+=' | '-=' | '<<=' | '>>=' | '&=' | '^=' | '|='
+    | ',' | '#' | '##'
+    ;
 
-Operator : '!' | '+' | '-' | '*' | '/' | '==' | '!=' | '<' | '<=' | '>' | '>=';
+Whitespace
+    :   [ \t]+
+        -> skip
+    ;
 
-//UnaryOperator :  '&' | '*' | '+' | '-' | '~' | '!';
+Newline
+    :   (   '\r' '\n'?
+        |   '\n'
+        )
+        -> skip
+    ;
 
-LineComment: '//'.*?'\r'?'\n'   -> skip;
+BlockComment
+    :   '/*' .*? '*/'
+        -> skip
+    ;
 
-BlockComment:  '/*'.*?'*/'  -> skip;
-
-WS : [ \t\r\n]+ -> skip ; // skip spaces, tabs, newlines
-
-// New Lexical Elements --------------------------------
-
-Digit : [0-9] ;
-
-DigitSequence : Digit+ ;
-
-Nondigit : [a-zA-Z_] ;
-
-Identifer : Nondigit (Nondigit | Digit)* ;
-
-Constant
-  : IntegerConstant
-  | FloatingConstant
-  | CharacterConstant
-  ;
-
-IntegerConstant
-  : [1-9] Digit*
-  | '0'
-  /* | '0' [0-7]* */
-  /* | ('0x' | '0X') [0-9a-fA-F]+ */
-  ;
-
-FloatingConstant
-  : DigitSequence '.' DigitSequence
-  ;
-
-CharacterConstant
-  : '\'' . '\''
-  ;
-
-StringLiteral
-  : '"' .* '"'
-  ;
+LineComment
+    :   '//' ~[\r\n]*
+        -> skip
+    ;
