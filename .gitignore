@@ -153,9 +153,15 @@ cython_debug/
 [Mm]akefile
 
 # antlr generated code
-cparser/
-!cparser/*.g4
-!cparser/__init__.py
+**/cparser/*.interp
+**/cparser/*.tokens
+**/cparser/*Lexer.py
+**/cparser/*Parser.py
+**/cparser/*Visitor.py
 _cpreprocess/
 !_cpreprocess/*.g4
 !_cpreprocess/__init__.py
+
+# temporary test files
+*.c
+!**/test/*
