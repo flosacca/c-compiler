@@ -27,9 +27,9 @@ class Visitor(CCompilerVisitor):
 
         # 控制llvm生成
         self.module: ir.Module = ir.Module()
-        self.module.triple = "x86_64-pc-linux-gnu"  # llvm.Target.from_default_triple()
+        self.module.triple = 'x86_64-pc-linux-gnu'  # llvm.Target.from_default_triple()
         # llvm.create_mcjit_compiler(backing_mod, target_machine)
-        self.module.data_layout = "e-m:e-i64:64-f80:128-n8:16:32:64-S128"
+        self.module.data_layout = 'e-m:e-i64:64-f80:128-n8:16:32:64-S128'
 
         # 语句块
         self.blocks: List[ir.Block] = []
@@ -101,9 +101,9 @@ class Visitor(CCompilerVisitor):
             i += 1
 
         # 存储结构体
-        the_result = self.structure.add_item(new_struct_name, parameter_name_list, parameter_type_list)
-        if the_result["result"] != "success":
-            raise SemanticError(ctx=ctx, msg=the_result["reason"])
+        result = self.structure.add_item(new_struct_name, parameter_name_list, parameter_type_list)
+        if result['status'] != 'success':
+            raise SemanticError(ctx=ctx, msg=result['reason'])
 
     def visitStructParam(self, ctx: CCompilerParser.StructParamContext):
         """
@@ -185,10 +185,10 @@ class Visitor(CCompilerVisitor):
                 new_variable = the_builder.alloca(current_type, name=id_name)
 
         # 存储这个结构体变量
-        the_variable = {"struct_name": struct_name, "type": current_type, "name": new_variable}
-        the_result = self.symbol_table.add_item(id_name, the_variable)
-        if the_result["result"] != "success":
-            raise SemanticError(ctx=ctx, msg=the_result["reason"])
+        the_variable = {'struct_name': struct_name, 'type': current_type, 'name': new_variable}
+        result = self.symbol_table.add_item(id_name, the_variable)
+        if result['status'] != 'success':
+            raise SemanticError(ctx=ctx, msg=result['reason'])
         return
 
     def visitStructMember(self, ctx: CCompilerParser.StructMemberContext) -> Dict[str, Union[Optional[str], Any]]:
@@ -214,10 +214,10 @@ class Visitor(CCompilerVisitor):
 
             # 读取结构体信息
             struct_name = struct_info['struct_name']
-            father_name = struct_info["name"]
+            father_name = struct_info['name']
             index = self.structure.get_member_index(struct_name, ctx.getChild(2).getText())
             if index is None:
-                raise SemanticError(ctx=ctx, msg="未找到这个变量")
+                raise SemanticError(ctx=ctx, msg='未找到这个变量')
             type = self.structure.get_member_type(struct_name, ctx.getChild(2).getText())
 
             zero = ir.Constant(int32, 0)
@@ -227,7 +227,7 @@ class Visitor(CCompilerVisitor):
             if self.whether_need_load:
                 new_variable = the_builder.load(new_variable)
 
-            result = {"type": type, "name": new_variable}
+            result = {'type': type, 'name': new_variable}
             return result
         else:
             raise NotImplementedError()
@@ -289,7 +289,7 @@ class Visitor(CCompilerVisitor):
         if function_name in self.functions:
             llvm_function = self.functions[function_name]
             if llvm_function.function_type != function_type:
-                raise SemanticError(ctx=ctx, msg="函数类型与先前的定义冲突: " + function_name)
+                raise SemanticError(ctx=ctx, msg='函数类型与先前的定义冲突: ' + function_name)
         else:
             self.functions[function_name] = ir.Function(self.module, function_type, name=function_name)
 
@@ -315,7 +315,7 @@ class Visitor(CCompilerVisitor):
         if function_name in self.functions:
             llvm_function = self.functions[function_name]
             if len(llvm_function.blocks) > 0:
-                raise SemanticError(ctx=ctx, msg="函数重定义: " + function_name)
+                raise SemanticError(ctx=ctx, msg='函数重定义: ' + function_name)
         else:
             llvm_function = ir.Function(self.module, function_type, name=function_name)
 
@@ -340,9 +340,9 @@ class Visitor(CCompilerVisitor):
             func_arg = llvm_function.args[i]
             variable = ir_builder.alloca(func_arg.type)
             ir_builder.store(func_arg, variable)
-            result = self.symbol_table.add_item(func_arg.name, {"type": func_arg.type, "name": variable})
-            if result["result"] != "success":
-                raise SemanticError(ctx=ctx, msg=result["reason"])
+            result = self.symbol_table.add_item(func_arg.name, {'type': func_arg.type, 'name': variable})
+            if result['status'] != 'success':
+                raise SemanticError(ctx=ctx, msg=result['reason'])
 
         # 处理函数体
         self.visit(ctx.getChild(2))  # funcBody
@@ -459,7 +459,7 @@ class Visitor(CCompilerVisitor):
             strlen = self.functions['strlen']
         else:
             strlenType = ir.FunctionType(int32, [ir.PointerType(int8)], var_arg=False)
-            strlen = ir.Function(self.module, strlenType, name="strlen")
+            strlen = ir.Function(self.module, strlenType, name='strlen')
             self.functions['strlen'] = strlen
 
         the_builder = self.builders[-1]
@@ -487,7 +487,7 @@ class Visitor(CCompilerVisitor):
             printf = self.functions['printf']
         else:
             printfType = ir.FunctionType(int32, [ir.PointerType(int8)], var_arg=True)
-            printf = ir.Function(self.module, printfType, name="printf")
+            printf = ir.Function(self.module, printfType, name='printf')
             self.functions['printf'] = printf
 
         the_builder = self.builders[-1]
@@ -522,7 +522,7 @@ class Visitor(CCompilerVisitor):
             scanf = self.functions['scanf']
         else:
             scanfType = ir.FunctionType(int32, [ir.PointerType(int8)], var_arg=True)
-            scanf = ir.Function(self.module, scanfType, name="scanf")
+            scanf = ir.Function(self.module, scanfType, name='scanf')
             self.functions['scanf'] = scanf
 
         the_builder = self.builders[-1]
@@ -563,7 +563,7 @@ class Visitor(CCompilerVisitor):
             gets = self.functions['gets']
         else:
             getsType = ir.FunctionType(int32, [], var_arg=True)
-            gets = ir.Function(self.module, getsType, name="gets")
+            gets = ir.Function(self.module, getsType, name='gets')
             self.functions['gets'] = gets
 
         the_builder = self.builders[-1]
@@ -609,7 +609,7 @@ class Visitor(CCompilerVisitor):
                 self.whether_need_load = prev_need_load
                 if arg_index >= func_arg_count:
                     if not func.function_type.var_arg:
-                        raise SemanticError(ctx=ctx, msg="参数数量不匹配")
+                        raise SemanticError(ctx=ctx, msg='参数数量不匹配')
                 else:
                     param = self.assignConvert(param, func.args[arg_index].type)
                 parameter_list.append(param['name'])
@@ -619,7 +619,7 @@ class Visitor(CCompilerVisitor):
             result = {'type': func.function_type.return_type, 'name': return_variable_name}
             return result
         else:
-            raise SemanticError(ctx=ctx, msg="未找到函数声明: " + function_name)
+            raise SemanticError(ctx=ctx, msg='未找到函数声明: ' + function_name)
 
     # 语句块相关函数
     def visitBlock(self, ctx: CCompilerParser.BlockContext):
@@ -652,10 +652,10 @@ class Visitor(CCompilerVisitor):
             else:
                 the_builder = self.builders[-1]
                 new_variable = the_builder.alloca(parameter_type, name=id_name)
-            the_variable = {"type": parameter_type, "name": new_variable}
-            the_result = self.symbol_table.add_item(id_name, the_variable)
-            if the_result["result"] != "success":
-                raise SemanticError(ctx=ctx, msg=the_result["reason"])
+            the_variable = {'type': parameter_type, 'name': new_variable}
+            result = self.symbol_table.add_item(id_name, the_variable)
+            if result['status'] != 'success':
+                raise SemanticError(ctx=ctx, msg=result['reason'])
 
             if ctx.getChild(i + 1).getText() != '=':
                 i += 2
@@ -692,10 +692,10 @@ class Visitor(CCompilerVisitor):
             the_builder = self.builders[-1]
             new_variable = the_builder.alloca(ir.ArrayType(type, length), name=id_name)
 
-        the_variable = {"type": ir.ArrayType(type, length), "name": new_variable}
-        the_result = self.symbol_table.add_item(id_name, the_variable)
-        if the_result["result"] != "success":
-            raise SemanticError(ctx=ctx, msg=the_result["reason"])
+        the_variable = {'type': ir.ArrayType(type, length), 'name': new_variable}
+        result = self.symbol_table.add_item(id_name, the_variable)
+        if result['status'] != 'success':
+            raise SemanticError(ctx=ctx, msg=result['reason'])
         return
 
     def visitAssignBlock(self, ctx: CCompilerParser.AssignBlockContext):
@@ -708,7 +708,7 @@ class Visitor(CCompilerVisitor):
         length = ctx.getChildCount()
         id_name = ctx.getChild(0).getText()
         if ('[' not in id_name) and not self.symbol_table.exist(id_name):
-            raise SemanticError(ctx=ctx, msg="变量未定义！")
+            raise SemanticError(ctx=ctx, msg='变量未定义！')
 
         # 待赋值结果
         value_to_be_assigned = self.visit(ctx.getChild(length - 2))
@@ -1211,7 +1211,7 @@ class Visitor(CCompilerVisitor):
         self.whether_need_load = prev_need_load
         ptr_type: ir.Type = index1['name'].type
         if not ptr_type.is_pointer:
-            raise SemanticError(ctx=ctx, msg="不是合法的左值")
+            raise SemanticError(ctx=ctx, msg='不是合法的左值')
         is_constant = False
         return {
             'type': ptr_type,
@@ -1273,7 +1273,7 @@ class Visitor(CCompilerVisitor):
                 'struct_name': arr['struct_name'] if 'struct_name' in arr else None
             }
         else:  # error!
-            raise SemanticError(ctx=ctx, msg="类型错误")
+            raise SemanticError(ctx=ctx, msg='类型错误')
 
     def visitString(self, ctx: CCompilerParser.StringContext):
         """
@@ -1317,7 +1317,7 @@ class Visitor(CCompilerVisitor):
             # index2 = convertIDS(index2, index1['type'])
             index2 = self.convertIDS(index2)
         else:
-            raise SemanticError(msg="类型不匹配")
+            raise SemanticError(msg='类型不匹配')
         return index1, index2
 
     def visitMulDiv(self, ctx: CCompilerParser.MulDivContext):
@@ -1510,16 +1510,16 @@ class Visitor(CCompilerVisitor):
 
         Returns:
             {
-                "const": bool 是否为 const
-                "volatile": bool 是否为 volatile
+                'const': bool 是否为 const
+                'volatile': bool 是否为 volatile
             }
         """
         qualifiers = []
         if ctx.getChildCount() > 1:
             qualifiers = self.visit(ctx.getChild(1))
         return {
-            "const": "const" in qualifiers,
-            "volatile": "volatile" in qualifiers,
+            'const': 'const' in qualifiers,
+            'volatile': 'volatile' in qualifiers,
         }
 
     def visitPointer(self, ctx: CCompilerParser.PointerContext) -> List[Dict[str, bool]]:
@@ -1534,8 +1534,8 @@ class Visitor(CCompilerVisitor):
 
         Returns:
             {
-                "const": bool 是否为 const
-                "volatile": bool 是否为 volatile
+                'const': bool 是否为 const
+                'volatile': bool 是否为 volatile
             }[]
         """
         if ctx.getChildCount() > 1:
@@ -1557,8 +1557,8 @@ class Visitor(CCompilerVisitor):
 
         Returns:
             {
-                "const": bool 是否为 const
-                "volatile": bool 是否为 volatile
+                'const': bool 是否为 const
+                'volatile': bool 是否为 volatile
             }
         """
 
@@ -1593,7 +1593,7 @@ class Visitor(CCompilerVisitor):
                 'struct_name': res['struct_name'] if 'struct_name' in res else None
             }
         else:  # error!
-            raise SemanticError(ctx=ctx, msg="类型错误")
+            raise SemanticError(ctx=ctx, msg='类型错误')
 
     def visitArgument(self, ctx: CCompilerParser.ArgumentContext):
         """
@@ -1615,7 +1615,7 @@ class Visitor(CCompilerVisitor):
 
         Returns:
              Dict[str, Union[List[str], ir.LiteralStructType]]:
-                {"Members": member_list, "Type": ir.LiteralStructType(type_list)}
+                {'Members': member_list, 'Type': ir.LiteralStructType(type_list)}
         """
         return self.structure.list[ctx.getChild(1).getText()]
 
@@ -1645,19 +1645,19 @@ class Visitor(CCompilerVisitor):
         # print(the_item)
         if the_item is not None:
             if self.whether_need_load:
-                return_value = builder.load(the_item["name"])
+                return_value = builder.load(the_item['name'])
                 return {
-                    "type": the_item["type"],
-                    "const": is_constant,
-                    "name": return_value,
-                    "struct_name": the_item["struct_name"] if "struct_name" in the_item else None
+                    'type': the_item['type'],
+                    'const': is_constant,
+                    'name': return_value,
+                    'struct_name': the_item['struct_name'] if 'struct_name' in the_item else None
                 }
             else:
                 return {
-                    "type": the_item["type"],
-                    "const": is_constant,
-                    "name": the_item["name"],
-                    "struct_name": the_item["struct_name"] if "struct_name" in the_item else None
+                    'type': the_item['type'],
+                    'const': is_constant,
+                    'name': the_item['name'],
+                    'struct_name': the_item['struct_name'] if 'struct_name' in the_item else None
                 }
         else:
             return {
@@ -1746,7 +1746,7 @@ class Visitor(CCompilerVisitor):
         process_index += '\0'
         length = len(bytearray(process_index, 'utf-8'))
         is_constant = False
-        real_return_value = ir.GlobalVariable(self.module, ir.ArrayType(int8, length), ".str%d" % mark_index)
+        real_return_value = ir.GlobalVariable(self.module, ir.ArrayType(int8, length), '.str%d' % mark_index)
         real_return_value.global_constant = True
         real_return_value.initializer = ir.Constant(ir.ArrayType(int8, length), bytearray(process_index, 'utf-8'))
         return {
@@ -1765,7 +1765,7 @@ class Visitor(CCompilerVisitor):
         Returns:
             None
         """
-        with open(filename, "w") as f:
+        with open(filename, 'w') as f:
             f.write(repr(self.module))
 
 

@@ -27,12 +27,9 @@ class SymbolTable:
         Returns:
             str: 成功返回元素，失败返回 None
         """
-        i = self.current_level
-        while i >= 0:
-            the_item_list = self.table[i]
-            if item in the_item_list:
-                return the_item_list[item]
-            i -= 1
+        for i in range(self.current_level, -1, -1):
+            if item in self.table[i]:
+                return self.table[i][item]
         return None
 
     def add_item(self, key: str, value: Dict[str, Union[str, ir.Type, ir.NamedValue]]) -> Dict[str, str]:
@@ -43,17 +40,15 @@ class SymbolTable:
             key (str): 待添加的 key
             value (Dict[str, Union[str, ir.Type, ir.NamedValue]]):
                 一个能标识变量的 Dict:
-                    {"struct_name": struct_name, "type": current_type, "name": new_variable}
-
+                    {'struct_name': struct_name, 'type': current_type, 'name': new_variable}
 
         Returns:
-            Dict[str, str]: 成功 {"result":"success"}，失败 {"result":"fail","reason":具体原因码}
+            Dict[str, str]: 成功 {'status':'success'}，失败 {'status':'fail','reason':具体原因码}
         """
         if key in self.table[self.current_level]:
-            result = {"result": "fail", "reason": Constants.ERROR_TYPE_REDEFINATION}
-            return result
+            return {'status': 'fail', 'reason': Constants.ERROR_TYPE_REDEFINATION}
         self.table[self.current_level][key] = value
-        return {"result": "success"}
+        return {'status': 'success'}
 
     def exist(self, item: str) -> bool:
         """
@@ -65,12 +60,7 @@ class SymbolTable:
         Returns:
             bool: 如果表里有，true，否则 false
         """
-        i = self.current_level
-        while i >= 0:
-            if item in self.table[i]:
-                return True
-            i -= 1
-        return False
+        return self.get_item(item) is not None
 
     def enter_scope(self) -> None:
         """
@@ -113,7 +103,7 @@ class Structure:
         """
         初始化 self.List.
         """
-        # self.List 中每个 key 对应的元素为一个 {"Members": member_list, "Type": ir.LiteralStructType(type_list)}。
+        # self.List 中每个 key 对应的元素为一个 {'Members': member_list, 'Type': ir.LiteralStructType(type_list)}。
         self.list: Dict[str, Dict[str, Union[List[str], ir.LiteralStructType]]] = {}
 
     def add_item(self, name: str, member_list: List[str], type_list: List[ir.Type]) -> Dict[str, str]:
@@ -126,15 +116,15 @@ class Structure:
             type_list (List[ir.Type]): 类型列表
 
         Returns:
-            Dict[str, str]: 成功则返回 {"result": "success"}，失败 {"result": "fail","reason": 具体原因码}
+            Dict[str, str]: 成功则返回 {'status': 'success'}，失败 {'status': 'fail','reason': 具体原因码}
         """
         # TODO: 处理这个错误
         if name in self.list:
-            result = {"result": "fail", "reason": Constants.ERROR_TYPE_REDEFINATION}
+            result = {'status': 'fail', 'reason': Constants.ERROR_TYPE_REDEFINATION}
             return result
-        newStruct = {"members": member_list, "type": ir.LiteralStructType(type_list)}
+        newStruct = {'members': member_list, 'type': ir.LiteralStructType(type_list)}
         self.list[name] = newStruct
-        return {"result": "success"}
+        return {'status': 'success'}
 
     def get_member_type(self, name: str, member: str) -> Optional[str]:
         """
@@ -150,8 +140,8 @@ class Structure:
         if name not in self.list:
             return None
         structItem = self.list[name]
-        theIndex = structItem["members"].index(member)
-        theType = structItem["type"].elements[theIndex]
+        theIndex = structItem['members'].index(member)
+        theType = structItem['type'].elements[theIndex]
         return theType
 
     def get_member_index(self, name: str, member: str) -> Optional[int]:
@@ -167,6 +157,6 @@ class Structure:
         """
         if name not in self.list:
             return None
-        structItem = self.list[name]["members"]
+        structItem = self.list[name]['members']
         theIndex = structItem.index(member)
         return theIndex
