@@ -4,7 +4,7 @@ class Constants:
     """
 
     # 重定义
-    ERROR_TYPE_REDEFINATION = "Type Redefination"
+    ERROR_TYPE_REDEFINITION = "Value Redefinition"
     
     # 未找到
-    ERROR_TYPE_UNDEFINED = "Type Undefined"
+    ERROR_TYPE_UNDEFINED = "Value Undefined"

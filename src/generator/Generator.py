@@ -6,10 +6,11 @@ from typing import Dict, List, Union, Optional, Tuple, Any
 
 from generator.ErrorListener import SemanticError
 from generator.ErrorListener import SyntaxErrorListener
-from generator.SymbolTable import SymbolTable, Structure
+from generator.SymbolTable import SymbolTable, Structure, TypedValue, const_value
 from cparser.CCompilerLexer import CCompilerLexer
 from cparser.CCompilerParser import CCompilerParser
 from cparser.CCompilerVisitor import CCompilerVisitor
+from generator.parser_util import Result
 
 double = ir.DoubleType()
 int1 = ir.IntType(1)
@@ -56,6 +57,9 @@ class Visitor(CCompilerVisitor):
 
         # 符号表
         self.symbol_table: SymbolTable = SymbolTable()
+
+        # 字符串常量表
+        self.string_constants: Dict[str, TypedValue] = {}
 
     # Old code {{{
     #
@@ -1760,7 +1764,38 @@ class Visitor(CCompilerVisitor):
     #
     # }}} Old code
 
-    def visitConstant(self, ctx: CCompilerParser.ConstantContext):
+    def load_value(self, value: TypedValue) -> TypedValue:
+        """
+        加载一个值
+
+        Args:
+            value(TypedValue): 待加载的值
+
+        Returns:
+            TypedValue: 如果这个值不需要加载，返回原始值，否则返回加载后的值
+        """
+        if not value.need_load:
+            return value
+        builder = self.builders[-1]
+        return builder.load(value.ir_value)
+
+    def str_constant(self, str_value: str) -> TypedValue:
+        if str_value in self.string_constants:
+            return self.string_constants[str_value]
+        str_bytes = bytearray(str_value + "\0", "utf-8")
+        variable_name = ".str" + str(len(self.string_constants))
+        ir_value = ir.GlobalVariable(ir.ArrayType(int8, len(str_bytes)), str_bytes, variable_name)
+        typed_value = TypedValue(ir_value, typ=ir_value.type, constant=True)
+        self.string_constants[str_value] = typed_value
+        return typed_value
+
+    def visitStringLiteral(self, ctx:CCompilerParser.StringLiteralContext) -> str:
+        """
+        处理字符串字面值
+        """
+        return ctx.getText()[1:-1].replace(r"\n", "\n").replace(r"\r", "\r")
+
+    def visitConstant(self, ctx: CCompilerParser.ConstantContext) -> TypedValue:
         # This rule has only lexical elements. In this case, getAltNumber()
         # always returns 1 so we cannot use it.
         if ctx.IntegerConstant():
@@ -1768,32 +1803,44 @@ class Visitor(CCompilerVisitor):
                 if re.fullmatch('0[0-7]*', s):
                     return int(s, 8)
                 return int(s, 0)
-            return {
-                'type': int32,
-                'const': True,
-                'name': ir.Constant(int32, parseInt(ctx.getText()))
-            }
-        if ctx.FloatingConstant():
-            return {
-                'type': double,
-                'const': True,
-                'name': ir.Constant(double, float(ctx.getText()))
-            }
-        if ctx.CharacterConstant():
-            return {
-                'type': int8,
-                'const': True,
-                'name': ir.Constant(int8, ord(ctx.getText()[1]))
-            }
-        raise 'impossible'
 
-    def visitPrimaryExpression(self, ctx: CCompilerParser.PrimaryExpressionContext):
+            return const_value(ir.Constant(int32, parseInt(ctx.getText())))
+        if ctx.FloatingConstant():
+            return const_value(ir.Constant(double, float(ctx.getText())))
+        if ctx.CharacterConstant():
+            return const_value(ir.Constant(int8, ord(ctx.getText()[1])))
+        raise SemanticError('impossible')
+
+    def visitPrimaryExpression(self, ctx: CCompilerParser.PrimaryExpressionContext) -> TypedValue:
+        """
+        Primary Expression
+        """
         altNum = ctx.getAltNumber()
-        if altNum == 1: # Indentifer
-            return None
-        if altNum == 2: # String literals
-            return None
+        if altNum == 1:  # Indentifer
+            identifier = ctx.getText()
+            item = self.symbol_table.get_item(identifier)
+            if item is None:
+                raise SemanticError("Undefined identifier: " + identifier)
+            return item
+        if altNum == 2:  # String literals
+            count = ctx.getChildCount()
+            str_result = ""
+            for i in range(count):
+                str_result += self.visit(ctx.getChild(i))
+            return self.str_constant(str_result)
+        if altNum == 3:  # Constant
+            # primaryExpression: constant
+            return self.visitChildren(ctx)
+        if altNum == 4:  # (expression)
+            # primaryExpression : '(' expression ')'
+            return self.visit(ctx.getChild(1))
         return self.visitChildren(ctx)
+
+    def visitPostfixExpression(self, ctx: CCompilerParser.PostfixExpressionContext) -> None:
+        """
+        Postfix Expression
+        """
+        pass
 
     def save(self, filename: str) -> None:
         """

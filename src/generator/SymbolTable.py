@@ -1,7 +1,26 @@
+from typing import Dict, List, Union, Optional
+
 from llvmlite import ir
 
 from generator.Constants import Constants
-from typing import Dict, List, Union, Optional
+from generator.parser_util import Result, success_result
+
+
+class TypedValue(object):
+
+    def __init__(self, ir_value: ir.Value, typ: ir.Type, constant: bool, name: str = None, need_load: bool = False):
+        self.type = typ
+        self.constant = constant
+        self.ir_value = ir_value
+        self.name = name
+        self.need_load = need_load
+
+    def is_named(self) -> bool:
+        return self.name is not None
+
+
+def const_value(value: ir.Constant, name: str = None) -> TypedValue:
+    return TypedValue(value, value.type, constant=True, name=name, need_load=False)
 
 
 class SymbolTable:
@@ -14,10 +33,10 @@ class SymbolTable:
         建立符号表.
         """
         # table：table[i]是一个字典，存着key，value组
-        self.table: List[Dict[str, str]] = [{}]
+        self.table: List[Dict[str, TypedValue]] = [{}]
         self.current_level: int = 0
 
-    def get_item(self, item: str) -> Optional[str]:
+    def get_item(self, item: str) -> Optional[TypedValue]:
         """
         从符号表中获取元素.
 
@@ -32,23 +51,21 @@ class SymbolTable:
                 return self.table[i][item]
         return None
 
-    def add_item(self, key: str, value: Dict[str, Union[str, ir.Type, ir.NamedValue]]) -> Dict[str, str]:
+    def add_item(self, key: str, value: TypedValue) -> Result[None]:
         """
         向符号表中添加元素.
 
         Args:
             key (str): 待添加的 key
-            value (Dict[str, Union[str, ir.Type, ir.NamedValue]]):
-                一个能标识变量的 Dict:
-                    {'struct_name': struct_name, 'type': current_type, 'name': new_variable}
+            value (TypedValue): 待添加的 value
 
         Returns:
-            Dict[str, str]: 成功 {'status':'success'}，失败 {'status':'fail','reason':具体原因码}
+            Optional[str]: 如果出现了异常，返回具体错误信息，否则返回 None
         """
         if key in self.table[self.current_level]:
-            return {'status': 'fail', 'reason': Constants.ERROR_TYPE_REDEFINATION}
+            return Result[None](False, message=Constants.ERROR_TYPE_REDEFINITION)
         self.table[self.current_level][key] = value
-        return {'status': 'success'}
+        return Result[None](True, value=None)
 
     def exist(self, item: str) -> bool:
         """
@@ -86,7 +103,7 @@ class SymbolTable:
 
     def is_global(self) -> bool:
         """
-        判断当前变量是否全局.
+        判断当前作用域是否是全局作用域.
 
         Returns:
             bool
@@ -103,7 +120,7 @@ class Structure:
         """
         初始化 self.List.
         """
-        # self.List 中每个 key 对应的元素为一个 {'Members': member_list, 'Type': ir.LiteralStructType(type_list)}。
+        # self.list 中每个 key 对应的元素为一个 {'Members': member_list, 'Type': ir.LiteralStructType(type_list)}。
         self.list: Dict[str, Dict[str, Union[List[str], ir.LiteralStructType]]] = {}
 
     def add_item(self, name: str, member_list: List[str], type_list: List[ir.Type]) -> Dict[str, str]:
@@ -120,7 +137,7 @@ class Structure:
         """
         # TODO: 处理这个错误
         if name in self.list:
-            result = {'status': 'fail', 'reason': Constants.ERROR_TYPE_REDEFINATION}
+            result = {'status': 'fail', 'reason': Constants.ERROR_TYPE_REDEFINITION}
             return result
         newStruct = {'members': member_list, 'type': ir.LiteralStructType(type_list)}
         self.list[name] = newStruct

@@ -142,9 +142,18 @@ from .RuleContextWithAltNum import *
 
 // Parser rules
 
-prog : expressionStatement+ ;
+prog : statement+ ;
+
+statement
+    : expressionStatement
+    | compoundStatement;
 
 expressionStatement : expression ';' ;
+
+compoundStatement : '{' statementList '}';
+
+// simplified
+statementList : statement*;
 
 constant
     : IntegerConstant
@@ -154,7 +163,7 @@ constant
 
 primaryExpression
     :   Identifier
-    |   StringLiteral+
+    |   stringLiteral+
     |   constant
     |   '(' expression ')'
     ;
@@ -288,6 +297,8 @@ typeQualifierList
     ;
 
 typeQualifier : 'const' | 'volatile' ;
+
+stringLiteral: StringLiteral;
 
 // Lexer rules
 
