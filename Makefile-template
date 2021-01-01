@@ -1,6 +1,7 @@
 # 修改此处地址
 ANTLRJAR = <...>\antlr-4.9-complete.jar
-ANTLRFLAG = -cp $(ANTLRJAR) org.antlr.v4.Tool -Dlanguage=Python3 -visitor
+ANTLRFLAG_PARSER = -cp $(ANTLRJAR) org.antlr.v4.Tool -DcontextSuperClass=RuleContextWithAltNum -Dlanguage=Python3 -visitor
+ANTLRFLAG = -cp $(ANTLRJAR) org.antlr.v4.Tool -DcontextSuperClass=RuleContextWithAltNum -Dlanguage=Python3 -visitor
 SRC_DIR = src
 PREPROCESS_DIR = $(SRC_DIR)/_cpreprocess
 PARSER_DIR = $(SRC_DIR)/cparser
@@ -11,7 +12,7 @@ all: parser preprocessor
 .PHONY: parser preprocessor testall
 
 parser:
-	java $(ANTLRFLAG) $(PARSER_DIR)/CCompiler.g4 -o $(PARSER_DIR)/
+	java $(ANTLRFLAG_PARSER) $(PARSER_DIR)/CCompiler.g4 -o $(PARSER_DIR)/
 
 preprocessor:
 	java $(ANTLRFLAG) $(PREPROCESS_DIR)/CPreprocessor.g4 -o $(PREPROCESS_DIR)/

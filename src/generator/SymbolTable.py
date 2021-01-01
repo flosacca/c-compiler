@@ -8,19 +8,29 @@ from generator.parser_util import Result, success_result
 
 class TypedValue(object):
 
-    def __init__(self, ir_value: ir.Value, typ: ir.Type, constant: bool, name: str = None, need_load: bool = False):
+    def __init__(self, ir_value: ir.Value, typ: ir.Type, constant: bool, name: str = None, lvalue_ptr: bool = False):
         self.type = typ
         self.constant = constant
         self.ir_value = ir_value
         self.name = name
-        self.need_load = need_load
+        self.lvalue_ptr = lvalue_ptr
 
     def is_named(self) -> bool:
         return self.name is not None
 
 
 def const_value(value: ir.Constant, name: str = None) -> TypedValue:
-    return TypedValue(value, value.type, constant=True, name=name, need_load=False)
+    """
+    返回一个常量值.
+
+    Args:
+        value (ir.Constant): ir 常量值.
+        name (str): 常量名 .
+
+    Returns:
+        TypedValue:
+    """
+    return TypedValue(value, value.type, constant=True, name=name, lvalue_ptr=False)
 
 
 class SymbolTable:

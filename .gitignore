@@ -158,6 +158,7 @@ cython_debug/
 **/cparser/*Lexer.py
 **/cparser/*Parser.py
 **/cparser/*Visitor.py
+**/cparser/*Listener.py
 _cpreprocess/
 !_cpreprocess/*.g4
 !_cpreprocess/__init__.py
