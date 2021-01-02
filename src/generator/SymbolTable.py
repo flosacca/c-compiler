@@ -35,6 +35,11 @@ class DeclarationSpecifiers:
                 return val
         return None
 
+    def is_typedef(self):
+        for (typ, val) in self.specifiers:
+            if typ == "storage" and val =="typedef":
+                return True
+        return False
 
 class ParameterList:
 
@@ -53,6 +58,14 @@ class ParameterList:
 class TypedValue:
 
     def __init__(self, ir_value: ir.Value, typ: ir.Type, constant: bool, name: str = None, lvalue_ptr: bool = False):
+        """
+        初始化
+        @param ir_value:    llvm ir 中对应的值
+        @param typ:         值的实际类型 (这与 ir_value.type 是不同的。比如一个 alloca 的 i32 局部变量，ir_value 的 type 会是 i32*，而这个字段是 i32
+        @param constant:    值是否是常量
+        @param name:        值的名称 (可以为 None，默认为 None)
+        @param lvalue_ptr:  值是否是一个左值 (这意味着 ir_value 的类型会是 typ.as_pointer()，需要用 load 和 store 访问。默认为 False)
+        """
         self.type = typ
         self.constant = constant
         self.ir_value = ir_value
