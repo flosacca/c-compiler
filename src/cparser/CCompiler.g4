@@ -142,7 +142,9 @@ from .RuleContextWithAltNum import *
 
 // Parser rules
 
-prog : statement+ ;
+prog : translationUnit* EOF;
+
+translationUnit : functionDefinition | declaration | ';' ;
 
 statement
     : expressionStatement
@@ -153,7 +155,7 @@ expressionStatement : expression ';' ;
 compoundStatement : '{' statementList '}';
 
 // simplified
-statementList : statement*;
+statementList : (statement | declaration)*;
 
 constant
     : IntegerConstant
@@ -291,14 +293,100 @@ pointer
 
 qualifiedPointer : '*' typeQualifierList? ;
 
-typeQualifierList
-    : typeQualifier
-    | typeQualifierList typeQualifier
-    ;
+typeQualifierList : typeQualifier+;
 
 typeQualifier : 'const' | 'volatile' ;
 
 stringLiteral: StringLiteral;
+
+// simplified to typeSpecifier
+functionDefinition
+    :   typeSpecifier declarator compoundStatement
+    ;
+
+declaration
+    :   declarationSpecifiers initDeclaratorList ';'
+	| 	declarationSpecifiers ';'
+    ;
+
+initDeclaratorList
+    :   initDeclarator
+    |   initDeclaratorList ',' initDeclarator
+    ;
+
+initDeclarator
+    :   declarator
+    |   declarator '=' initializer
+    ;
+
+initializer
+    :   assignmentExpression
+    |   '{' initializerList '}'
+    |   '{' initializerList ',' '}'
+    ;
+
+initializerList
+    :   initializer
+    |   initializerList ',' initializer
+    ;
+
+declarationSpecifiers: declarationSpecifier*;
+
+declarationSpecifier
+    :   storageClassSpecifier
+    |   typeSpecifier
+    |   typeQualifier
+    ;
+
+storageClassSpecifier
+    :   'typedef'
+    ;
+
+parameterTypeList
+    :
+    |   parameterList
+    |   parameterList ',' '...'
+    ;
+
+parameterList
+    :   parameterDeclaration
+    |   parameterList ',' parameterDeclaration
+    ;
+
+parameterDeclaration
+    :   declarationSpecifiers declarator
+    ;
+
+directDeclarator
+    :   Identifier                                      # directDeclarator1
+    |   '(' declarator ')'                              # directDeclarator2
+    |   directDeclarator '[' assignmentExpression? ']'  # directDeclarator3
+    |   directDeclarator '(' parameterTypeList ')'      # directDeclarator4
+    ;
+
+declarator
+    :   pointer? directDeclarator
+    ;
+
+typeSpecifier
+    :   primitiveType
+    |   typedefName
+    |   typeSpecifier pointer
+    ;
+
+primitiveType
+    :   'void'
+    |   'char'
+    |   'short'
+    |   'int'
+    |   'long'
+    |   'float'
+    |   'double'
+    |   'signed'
+    |   'unsigned'
+    ;
+
+typedefName : Identifier;
 
 // Lexer rules
 

@@ -1,4 +1,4 @@
-from typing import Dict, List, Union, Optional
+from typing import Dict, List, Union, Optional, Tuple
 
 from llvmlite import ir
 
@@ -6,7 +6,51 @@ from generator.Constants import Constants
 from generator.parser_util import Result, success_result
 
 
-class TypedValue(object):
+class DeclarationSpecifiers:
+
+    def __init__(self):
+        self.specifiers: List[Tuple[str, Union[str, ir.Type]]] = []
+        pass
+
+    def append_type_specifier(self, specifier: ir.Type):
+        self.specifiers.append(("type", specifier))
+
+    def append_type_qualifier(self, qualifier: str):
+        self.specifiers.append(("type_qualifier", qualifier))
+
+    def append_storage_class_specifier(self, qualifier: str):
+        self.specifiers.append(("storage", qualifier))
+
+    def append(self, typ: str, val: Union[str, ir.Type]):
+        if typ == "type":
+            self.append_type_specifier(val)
+        if typ == "type_qualifier":
+            self.append_type_qualifier(val)
+        if typ == "storage":
+            self.append_storage_class_specifier(val)
+
+    def get_type(self):
+        for (typ, val) in self.specifiers:
+            if typ == "type":
+                return val
+        return None
+
+
+class ParameterList:
+
+    def __init__(self, parameters: List[Tuple[ir.Type, Optional[str]]], var_arg: bool):
+        self.parameters = parameters
+        self.var_arg = var_arg
+        self.arg_list = [param[0] for param in self.parameters]
+
+    def __getitem__(self, item: int):
+        return self.parameters[item]
+
+    def __len__(self):
+        return len(self.parameters)
+
+
+class TypedValue:
 
     def __init__(self, ir_value: ir.Value, typ: ir.Type, constant: bool, name: str = None, lvalue_ptr: bool = False):
         self.type = typ
@@ -43,10 +87,10 @@ class SymbolTable:
         建立符号表.
         """
         # table：table[i]是一个字典，存着key，value组
-        self.table: List[Dict[str, TypedValue]] = [{}]
+        self.table: List[Dict[str, Union[TypedValue, ir.Type]]] = [{}]
         self.current_level: int = 0
 
-    def get_item(self, item: str) -> Optional[TypedValue]:
+    def get_item(self, item: str) -> Optional[Union[TypedValue, ir.Type]]:
         """
         从符号表中获取元素.
 
@@ -61,7 +105,7 @@ class SymbolTable:
                 return self.table[i][item]
         return None
 
-    def add_item(self, key: str, value: TypedValue) -> Result[None]:
+    def add_item(self, key: str, value: Union[TypedValue, ir.Type]) -> Result[None]:
         """
         向符号表中添加元素.
 

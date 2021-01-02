@@ -6,7 +6,7 @@ from typing import Dict, List, Union, Optional, Tuple, Any
 
 from generator.ErrorListener import SemanticError
 from generator.ErrorListener import SyntaxErrorListener
-from generator.SymbolTable import SymbolTable, Structure, TypedValue, const_value
+from generator.SymbolTable import SymbolTable, Structure, TypedValue, const_value, ParameterList, DeclarationSpecifiers
 from cparser.CCompilerLexer import CCompilerLexer
 from cparser.CCompilerParser import CCompilerParser
 from cparser.CCompilerVisitor import CCompilerVisitor
@@ -1507,69 +1507,6 @@ class Visitor(CCompilerVisitor):
     #         return double
     #     return void
     #
-    # def visitQualifiedPointer(self, ctx: CCompilerParser.QualifiedPointerContext) -> Dict[str, bool]:
-    #     """
-    #     指针修饰符
-    #
-    #     语法规则：
-    #         pointer : '*' typeQualifierList?
-    #
-    #     Args:
-    #         ctx (CCompilerParser.QualifiedPointerContext):
-    #
-    #     Returns:
-    #         {
-    #             'const': bool 是否为 const
-    #             'volatile': bool 是否为 volatile
-    #         }
-    #     """
-    #     qualifiers = []
-    #     if ctx.getChildCount() > 1:
-    #         qualifiers = self.visit(ctx.getChild(1))
-    #     return {
-    #         'const': 'const' in qualifiers,
-    #         'volatile': 'volatile' in qualifiers,
-    #     }
-    #
-    # def visitPointer(self, ctx: CCompilerParser.PointerContext) -> List[Dict[str, bool]]:
-    #     """
-    #     指针修饰符列表
-    #
-    #     语法规则：
-    #         pointer : qualifiedPointer | pointer qualifiedPointer
-    #
-    #     Args:
-    #         ctx (CCompilerParser.PointerContext):
-    #
-    #     Returns:
-    #         {
-    #             'const': bool 是否为 const
-    #             'volatile': bool 是否为 volatile
-    #         }[]
-    #     """
-    #     if ctx.getChildCount() > 1:
-    #         pointers: List[Dict[str, bool]] = self.visit(ctx.getChild(0))
-    #         pointers.append(self.visit(ctx.getChild(1)))
-    #         return pointers
-    #     else:
-    #         return [self.visit(ctx.getChild(0))]
-    #
-    # def visitTypeQualifierList(self, ctx: CCompilerParser.TypeQualifierListContext):
-    #     """
-    #     指针修饰符
-    #
-    #     语法规则：
-    #         pointer : '*' typeQualifierList?
-    #
-    #     Args:
-    #         ctx (CCompilerParser.QualifiedPointerContext):
-    #
-    #     Returns:
-    #         {
-    #             'const': bool 是否为 const
-    #             'volatile': bool 是否为 volatile
-    #         }
-    #     """
     #
     # def visitArrayItem(self, ctx: CCompilerParser.ArrayItemContext):
     #     """
@@ -1766,6 +1703,396 @@ class Visitor(CCompilerVisitor):
     #
     # }}} Old code
 
+    def visitProg(self, ctx: CCompilerParser.ProgContext) -> None:
+        """
+        代码主文件.
+
+        语法规则：
+            prog : translationUnit* EOF;
+
+        Args:
+            ctx (CCompilerParser.ProgContext):
+
+        Returns:
+            None
+        """
+        # initialize symbol table
+        self.symbol_table.add_item("int", int32)
+        self.symbol_table.add_item("long", int32)
+        self.symbol_table.add_item("double", double)
+        self.symbol_table.add_item("char", int8)
+        self.symbol_table.add_item("void", void)
+        self.symbol_table.add_item("bool", int1)
+
+        for i in range(ctx.getChildCount()):
+            self.visit(ctx.getChild(i))
+
+    def visitTranslationUnit(self, ctx: CCompilerParser.TranslationUnitContext) -> None:
+        """
+        翻译单元.
+
+        语法规则：
+            translationUnit : functionDefinition | declaration | ';' ;
+
+        Args:
+            ctx (CCompilerParser.TranslationUnitContext):
+
+        Returns:
+            None
+        """
+        self.visit(ctx.getChild(0))
+
+    def visitFunctionDefinition(self, ctx: CCompilerParser.FunctionDefinitionContext) -> None:
+        """
+        函数定义.
+
+        语法规则：
+            functionDefinition
+                :   typeSpecifier declarator compoundStatement
+                ;
+
+        Args:
+            ctx (CCompilerParser.FunctionDefinitionContext):
+
+        Returns:
+            None
+        """
+        ret_type: ir.Type = self.visit(ctx.typeSpecifier())
+        if ret_type is None:
+            raise SemanticError(ctx, "返回类型未指定")
+        declarator_func = self.visit(ctx.declarator())
+        function_name, function_type, parameter_list = declarator_func(ret_type)
+
+        # 判断重定义，存储函数
+        if function_name in self.functions:
+            llvm_function = self.functions[function_name]
+            if len(llvm_function.blocks) > 0:
+                raise SemanticError(ctx=ctx, msg='函数重定义: ' + function_name)
+        else:
+            llvm_function = ir.Function(self.module, function_type, name=function_name)
+
+        # 函数的参数名
+        for i in range(len(parameter_list)):
+            typ, name = parameter_list[i]
+            llvm_function.args[i].name = name
+
+        # 函数 block
+        block: ir.Block = llvm_function.append_basic_block(name=function_name + '.entry')
+        self.functions[function_name] = llvm_function
+
+        ir_builder: ir.IRBuilder = ir.IRBuilder(block)
+        self.blocks.append(block)
+        self.builders.append(ir_builder)
+
+        # 进入函数作用域
+        self.current_function = function_name
+        self.symbol_table.enter_scope()
+
+        # 存储函数的变量
+        for i in range(len(parameter_list)):
+            func_arg = llvm_function.args[i]
+            variable = ir_builder.alloca(func_arg.type)
+            ir_builder.store(func_arg, variable)
+            result = self.symbol_table.add_item(func_arg.name, TypedValue(variable, func_arg.type, False))
+            if not result.success:
+                raise SemanticError(ctx=ctx, msg=result.message)
+
+        # 处理函数体
+        self.visit(ctx.getChild(2))  # funcBody
+
+        # 处理完毕，退出函数作用域
+        self.current_function = ''
+        self.blocks.pop()
+        self.builders.pop()
+        self.symbol_table.quit_scope()
+        return
+
+    def visitDirectDeclarator1(self, ctx: CCompilerParser.DirectDeclarator1Context):
+        """
+        directDeclarator : Identifier
+        """
+        identifier = ctx.getText()
+        return lambda typ: (identifier, typ, None)
+
+    def visitDirectDeclarator2(self, ctx: CCompilerParser.DirectDeclarator2Context):
+        """
+        directDeclarator : '(' declarator ')'
+        """
+        return self.visit(ctx.declarator())
+
+    def visitDirectDeclarator3(self, ctx: CCompilerParser.DirectDeclarator3Context):
+        """
+        directDeclarator : directDeclarator '[' assignmentExpression? ']'
+        """
+        arr_len = -1  # todo: 想一个别的办法处理一下
+        if ctx.assignmentExpression() is not None:
+            exp_const: ir.Constant = self.visit(ctx.assignmentExpression()).ir_value
+            if isinstance(exp_const, ir.Constant):
+                arr_len = exp_const.constant
+            else:
+                raise SemanticError(ctx, "数组的长度必须是常量表达式")
+        declarator_func = self.visit(ctx.directDeclarator())
+
+        def create_arr_ret(typ: ir.Type):
+            id1, typ1, _ = declarator_func(typ)
+            return id1, ir.ArrayType(typ1, arr_len), None
+
+        return create_arr_ret
+
+    def visitDirectDeclarator4(self, ctx: CCompilerParser.DirectDeclarator4Context):
+        """
+        directDeclarator : directDeclarator '(' parameterTypeList ')'
+        """
+        declarator_func = self.visit(ctx.directDeclarator())
+        parameter_list = self.visit(ctx.parameterTypeList())
+
+        def create_func_ret(typ: ir.Type):
+            identifier1, typ1, _ = declarator_func(typ)
+            return identifier1, ir.FunctionType(typ1, parameter_list.arg_list, parameter_list.var_arg), parameter_list
+        return create_func_ret
+
+    def visitParameterTypeList(self, ctx: CCompilerParser.ParameterTypeListContext) -> ParameterList:
+        """
+        Parameter type list
+        语法规则: parameterTypeList : | parameterList | parameterList ',' '...' ;
+        Return: ParameterList: 参数列表
+        """
+        if ctx.parameterList():
+            return ParameterList(self.visit(ctx.parameterList()), ctx.getChildCount() == 3)
+        return ParameterList([], False)
+
+    def visitParameterList(self, ctx: CCompilerParser.ParameterListContext) -> List[Tuple[ir.Type, Optional[str]]]:
+        """
+        Parameters
+
+        语法规则:
+            parameterList
+                :   parameterDeclaration
+                |   parameterList ',' parameterDeclaration
+                ;
+        Returns:
+            List[Tuple[ir.Type, Optional[str]]]: (类型, 可选名称) 的列表
+        """
+        if ctx.parameterList() is not None:
+            prev_list = self.visit(ctx.parameterList())
+        else:
+            prev_list = []
+        param = self.visit(ctx.parameterDeclaration())
+        prev_list.append(param)
+        return prev_list
+
+    def visitParameterDeclaration(self, ctx: CCompilerParser.ParameterDeclarationContext) -> Tuple[ir.Type, Optional[str]]:
+        """
+        Parameter declaration
+        语法规则: parameterDeclaration : declarationSpecifiers declarator ;
+        """
+        specifiers: DeclarationSpecifiers = self.visit(ctx.declarationSpecifiers())
+        base_type = specifiers.get_type()
+        if base_type is None:
+            raise SemanticError(ctx, "未指定类型")
+        declarator_func = self.visit(ctx.declarator())
+        identifier, typ, parameter_list = declarator_func(base_type)
+        if isinstance(typ, ir.ArrayType):
+            # decay
+            typ: ir.ArrayType
+            typ = typ.element.as_pointer()
+        return typ, identifier
+
+    def visitDeclarationSpecifiers(self, ctx: CCompilerParser.DeclarationSpecifiersContext) -> DeclarationSpecifiers:
+        """
+        声明限定符列表.
+
+        语法规则：
+            declarationSpecifiers: declarationSpecifier*;
+
+        Args:
+            ctx (CCompilerParser.DeclarationSpecifiersContext):
+
+        Returns:
+            List[Tuple[str, Any]]: 限定符列表
+        """
+        specifiers = DeclarationSpecifiers()
+        for i in range(ctx.getChildCount()):
+            typ, val = self.visit(ctx.getChild(i))
+            specifiers.append(typ, val)
+        return specifiers
+
+    def visitDeclarationSpecifier(self, ctx: CCompilerParser.DeclarationSpecifierContext) -> (str, Union[str, ir.Type]):
+        """
+        声明限定符
+
+        语法规则:
+            declarationSpecifier
+                :   storageClassSpecifier
+                |   typeSpecifier
+                |   typeQualifier
+                ;
+        """
+        altNum = ctx.getAltNumber()
+        if altNum == 1:
+            return "storage", ctx.getText()
+        if altNum == 2:
+            return "type", self.visit(ctx.typeSpecifier())
+        if altNum == 3:
+            return "type_qualifier", self.visit(ctx.typeQualifier())
+
+    def visitDeclarator(self, ctx:CCompilerParser.DeclaratorContext):
+        """
+        描述符.
+
+        语法规则：
+            declarator
+                :   pointer? directDeclarator
+                ;
+
+        Args:
+            ctx (CCompilerParser.DeclaratorContext):
+
+        Returns:
+            lambda typ : (str, ir.Type, Optional[ParameterList])
+                str: 标识符
+                ir.Type: 类型
+                Optional[ParameterList]: 参数列表 (对于函数声明/定义有效)
+        """
+        declarator_func = self.visit(ctx.directDeclarator())
+        if ctx.pointer():
+            pointer = self.visit(ctx.pointer())
+
+            def pointer_declarator(typ: ir.Type):
+                identifier1, typ1, parameter_list1 = declarator_func(typ)
+                for _ in pointer:
+                    typ1 = typ1.as_pointer()
+                return identifier1, typ1, parameter_list1
+            return pointer_declarator
+        return declarator_func
+
+    def visitDeclaration(self, ctx: CCompilerParser.DeclarationContext) -> None:
+        """
+        声明.
+
+        语法规则：
+            declaration
+                :   declarationSpecifiers initDeclaratorList ';'
+                | 	declarationSpecifiers ';'
+                ;
+
+        Args:
+            ctx (CCompilerParser.DeclarationContext):
+
+        Returns:
+            None
+        """
+        pass
+
+    def visitQualifiedPointer(self, ctx: CCompilerParser.QualifiedPointerContext) -> Dict[str, bool]:
+        """
+        指针修饰符
+
+        语法规则：
+            pointer : '*' typeQualifierList?
+
+        Args:
+            ctx (CCompilerParser.QualifiedPointerContext):
+
+        Returns:
+            {
+                'const': bool 是否为 const
+                'volatile': bool 是否为 volatile
+            }
+        """
+        qualifiers = []
+        if ctx.getChildCount() > 1:
+            qualifiers = self.visit(ctx.getChild(1))
+        return {
+            'const': 'const' in qualifiers,
+            'volatile': 'volatile' in qualifiers,
+        }
+
+    def visitPointer(self, ctx: CCompilerParser.PointerContext) -> List[Dict[str, bool]]:
+        """
+        指针修饰符列表
+
+        语法规则：
+            pointer : qualifiedPointer | pointer qualifiedPointer
+
+        Args:
+            ctx (CCompilerParser.PointerContext):
+
+        Returns:
+            {
+                'const': bool 是否为 const
+                'volatile': bool 是否为 volatile
+            }[]
+        """
+        if ctx.getChildCount() > 1:
+            pointers: List[Dict[str, bool]] = self.visit(ctx.getChild(0))
+            pointers.append(self.visit(ctx.getChild(1)))
+            return pointers
+        else:
+            return [self.visit(ctx.getChild(0))]
+
+    def visitTypeQualifierList(self, ctx: CCompilerParser.TypeQualifierListContext) -> List[str]:
+        """
+        修饰符列表
+
+        语法规则：
+            typeQualifierList : typeQualifier+
+
+        Args:
+            ctx (CCompilerParser.TypeQualifierListContext):
+
+        Returns:
+            List[str]: 修饰符列表
+        """
+        qualifiers = []
+        for i in range(ctx.getChildCount()):
+            qualifiers.append(self.visit(ctx.getChild(i)))
+        return qualifiers
+
+    def visitTypeQualifier(self, ctx: CCompilerParser.TypeQualifierContext) -> str:
+        """
+        修饰符
+
+        语法规则：
+            typeQualifier : 'const' | 'volatile' ;
+
+        Args:
+            ctx (CCompilerParser.TypeQualifierContext):
+
+        Returns:
+            str: 修饰符
+        """
+        return ctx.getText()
+
+    def visitTypeSpecifier(self, ctx: CCompilerParser.TypeSpecifierContext) -> ir.Type:
+        """
+        Type Specifier
+
+        语法规则:
+            typeSpecifier
+                :   primitiveType
+                |   typedefName
+                |   typeSpecifier pointer
+                ;
+        """
+        altNum = ctx.getAltNumber()
+        if altNum == 1:
+            return self.visit(ctx.primitiveType())
+        if altNum == 2:
+            type_id: str = ctx.getText()
+            actual_type = self.symbol_table.get_item(type_id)
+            if actual_type is None:
+                raise SemanticError(ctx, "未定义的类型: " + type_id)
+            if not isinstance(actual_type, ir.Type):
+                raise SemanticError(ctx, "不是合法的类型: " + type_id)
+            return actual_type
+        if altNum == 3:
+            base_type: ir.Type = self.visit(ctx.typeSpecifier())
+            pointer_list: list = self.visit(ctx.pointer())
+            for _ in pointer_list:  # const 之类的访问修饰符被省略
+                base_type = base_type.as_pointer()
+            return base_type
+
     def load_lvalue(self, lvalue_ptr: TypedValue) -> Union[ir.Value, ir.NamedValue]:
         """
         从左值地址加载出一个值.
@@ -1810,6 +2137,7 @@ class Visitor(CCompilerVisitor):
         """
         处理字符串字面值
         """
+        # todo 处理更多的转义字符
         return ctx.getText()[1:-1].replace(r"\n", "\n").replace(r"\r", "\r")
 
     def visitConstant(self, ctx: CCompilerParser.ConstantContext) -> TypedValue:
@@ -1852,6 +2180,12 @@ class Visitor(CCompilerVisitor):
             # primaryExpression : '(' expression ')'
             return self.visit(ctx.getChild(1))
         return self.visitChildren(ctx)
+
+    def visitPrimitiveType(self, ctx: CCompilerParser.PrimitiveTypeContext) -> ir.Type:
+        """
+        Primitive type
+        """
+        return self.symbol_table.get_item(ctx.getText())
 
     def visitPostfixExpression(self, ctx: CCompilerParser.PostfixExpressionContext) -> TypedValue:
         """
@@ -2014,6 +2348,6 @@ def generate(input_filename: str, output_filename: str):
     tree = parser.prog()
     v = Visitor()
     v.visit(tree)
-    # v.save(output_filename)
+    v.save(output_filename)
 
 # del CCompilerParser
