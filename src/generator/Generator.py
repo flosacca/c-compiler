@@ -1783,6 +1783,9 @@ class Visitor(CCompilerVisitor):
                 raise SemanticError(ctx=ctx, msg='函数重定义: ' + function_name)
         else:
             llvm_function = ir.Function(self.module, function_type, name=function_name)
+            result = self.symbol_table.add_item(function_name, llvm_function)
+            if not result.success:
+                raise SemanticError('函数重定义: ' + function_name, ctx)
 
         # 函数的参数名
         for i in range(len(parameter_list)):
@@ -1792,9 +1795,6 @@ class Visitor(CCompilerVisitor):
         # 函数 block
         block: ir.Block = llvm_function.append_basic_block(name=function_name + '.entry')
         self.functions[function_name] = llvm_function
-        result = self.symbol_table.add_item(function_name, llvm_function)
-        if not result.success:
-            raise SemanticError('函数重定义: ' + function_name, ctx)
 
         ir_builder: ir.IRBuilder = ir.IRBuilder(block)
         self.blocks.append(block)
@@ -2045,8 +2045,7 @@ class Visitor(CCompilerVisitor):
                     if not result.success:
                         raise SemanticError("Symbol redefined: " + identifier, ctx)
                     if initializer:
-                        value = self.load_lvalue(initializer)
-                        ir_builder.store(value, variable)
+                        ir_builder.store(self.convert_type(initializer, typ, ctx), variable)
 
     def visitInitDeclarator(self, ctx: CCompilerParser.InitDeclaratorContext):
         """
