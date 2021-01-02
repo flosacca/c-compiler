@@ -171,27 +171,28 @@ primaryExpression
     ;
 
 postfixExpression
-    :   primaryExpression
-    |   postfixExpression '[' expression ']'
-    |   postfixExpression '(' argumentExpressionList? ')'
-    |   postfixExpression '.' Identifier
-    |   postfixExpression '->' Identifier
-    |   postfixExpression '++'
-    |   postfixExpression '--'
+    :   primaryExpression                                   # postfixExpression_1
+    |   postfixExpression '[' expression ']'                # postfixExpression_2
+    |   postfixExpression '(' argumentExpressionList? ')'   # postfixExpression_3
+    |   postfixExpression '.' Identifier                    # postfixExpression_4
+    |   postfixExpression '->' Identifier                   # postfixExpression_5
+    |   postfixExpression '++'                              # postfixExpression_6
+    |   postfixExpression '--'                              # postfixExpression_7
     ;
 
+// 暂时不做
 argumentExpressionList
     :   assignmentExpression
     |   argumentExpressionList ',' assignmentExpression
     ;
 
 unaryExpression
-    :   postfixExpression
-    |   '++' unaryExpression
-    |   '--' unaryExpression
-    |   unaryOperator castExpression
-    |   'sizeof' unaryExpression
-    |   'sizeof' '(' typeName ')'
+    :   postfixExpression                       # unaryExpression_1
+    |   '++' unaryExpression                    # unaryExpression_2
+    |   '--' unaryExpression                    # unaryExpression_3
+    |   unaryOperator castExpression            # unaryExpression_4
+    |   'sizeof' unaryExpression                # unaryExpression_5
+    |   'sizeof' '(' typeName ')'               # unaryExpression_6
     ;
 
 unaryOperator

@@ -2,7 +2,7 @@ from antlr4 import *
 from llvmlite import ir
 
 import re
-from typing import Dict, List, Union, Optional, Tuple, Any
+from typing import Dict, List, Union, Optional, Tuple, Any, Type
 
 from generator.ErrorListener import SemanticError
 from generator.ErrorListener import SyntaxErrorListener
@@ -2190,21 +2190,27 @@ class Visitor(CCompilerVisitor):
         builder = self.builders[-1]
         return builder.load(lvalue_ptr.ir_value)
 
-    def store_lvalue(self, value: ir.Value, lvalue_ptr: TypedValue) -> None:
+    def store_lvalue(self, value: ir.Value, lvalue_ptr: TypedValue, new_type: ir.Type = None) -> None:
         """
-        存储一个值到左值中.
+        将值存入左值地址处.
 
         :param value: 待存储的值
-        :type value: TypedValue
-        :param lvalue_ptr 左值的地址
-        :type lvalue_ptr TypedValue
-        :return: 如果 ptr 是右值，不做事，否则存储 value 至 lvalue_ptr 处
+        :type value: ir.Value
+        :param lvalue_ptr: 左值的地址(的 TypedValue)
+        :type lvalue_ptr: TypedValue
+        :param new_type: 如果不为 None，则替换旧类型
+        :type new_type: ir.Type
+        :return: 如果 lvalue_ptr 是右值，则替换原来的 value，存储 value 至 lvalue_ptr 处
         :rtype: None
         """
         if not lvalue_ptr.lvalue_ptr:
-            return
-        builder = self.builders[-1]
-        builder.store(value, lvalue_ptr.ir_value)
+            lvalue_ptr.ir_value = value
+        else:
+            builder = self.builders[-1]
+            builder.store(value, lvalue_ptr.ir_value)
+
+        if new_type is not None:
+            lvalue_ptr.type = new_type
 
     def str_constant(self, str_value: str) -> TypedValue:
         if str_value in self.string_constants:
@@ -2216,6 +2222,38 @@ class Visitor(CCompilerVisitor):
         typed_value = TypedValue(ir_value, typ=ir_value.type, constant=True)
         self.string_constants[str_value] = typed_value
         return typed_value
+
+    def bit_extend(self, value1, value2, ctx=None) -> Tuple[Any, Any, ir.Type]:
+        """
+        将 value1 和 value2 拓展成相同的位数, 都为 ir.Value.
+        目前为方便起见，整数全拓展为最大的整数类型，若有浮点数，都拓展为 Double
+
+        :param value1:
+        :type value1:
+        :param value2:
+        :type value2:
+        :param ctx: 用于报错
+        :return:
+        :rtype:
+        """
+        builder = self.builders[-1]
+        if isinstance(value1.type, ir.types.DoubleType) and not isinstance(value2.type, ir.types.DoubleType):
+            new_v1 = value1
+            new_v2 = builder.sitofp(value2, double)
+            return new_v1, new_v2, double
+        elif not isinstance(value1.type, ir.types.DoubleType) and isinstance(value2.type, ir.types.DoubleType):
+            new_v1 = builder.sitofp(value1, double)
+            new_v2 = value2
+            return new_v1, new_v2, double
+        elif isinstance(value1.type, ir.types.DoubleType) and isinstance(value2.type, ir.types.DoubleType):
+            return value1, value2, double
+        elif isinstance(value1.type, ir.types.IntType) and isinstance(value2.type, ir.types.IntType):
+            new_type = value1.type if value1.type.width >= value2.type.width else value2.type
+            new_v1 = builder.sext(value1, new_type)
+            new_v2 = builder.sext(value2, new_type)
+            return new_v1, new_v2, new_type
+
+        raise SemanticError('Bit extend error.', ctx=ctx)
 
     def visitStringLiteral(self, ctx: CCompilerParser.StringLiteralContext) -> str:
         """
@@ -2271,134 +2309,167 @@ class Visitor(CCompilerVisitor):
         """
         return self.symbol_table.get_item(ctx.getText())
 
-    def visitPostfixExpression(self, ctx: CCompilerParser.PostfixExpressionContext) -> TypedValue:
-        """
-        Postfix Expression.
-
-        :param ctx:
-        :type ctx:
-        :return:
-        :rtype:
-        """
-        altNum = ctx.getAltNumber()
-        builder = self.builders[-1]
+    def visitPostfixExpression_1(self, ctx: CCompilerParser.PostfixExpression_1Context) -> TypedValue:
+        # primaryExpression
         v1: TypedValue = self.visit(ctx.getChild(0))
-        if altNum == 1:     # primaryExpression
-            return v1
-        elif altNum == 2:   # postfixExpression '[' expression ']'
-            if not v1.lvalue_ptr:
-                raise SemanticError('Postfix Expression(#2) needs lvalue.', ctx=ctx)
-            is_pointer = isinstance(v1.type, ir.types.PointerType)
-            is_array = isinstance(v1.type, ir.types.ArrayType)
-            if not is_array and not is_pointer:
-                raise SemanticError("Postfix Expression is not a array or pointer.", ctx=ctx)
-            v2: TypedValue = self.visit(ctx.getChild(2))
-            # 数组地址
-            base_ptr = self.load_lvalue(v1)
-            # 偏移
-            offset = self.load_lvalue(v2)
-            result: ir.Instruction
-            if is_pointer:
-                result = builder.gep(base_ptr, [offset], inbounds=False)
-            elif is_array:
-                result = builder.gep(base_ptr, [int32_zero, offset], inbounds=True)
-            else:
-                raise SemanticError("Postfix expression(#2) is not a array or pointer.", ctx=ctx)
-            return TypedValue(result, result.type, constant=False, name=None, lvalue_ptr=True)
-        elif altNum == 3:   # postfixExpression '(' argumentExpressionList? ')'
-            # TODO 暂时不做好吗
-            pass
-        elif altNum == 4:   # postfixExpression '.' Identifier
-            if not v1.lvalue_ptr:
-                raise SemanticError('Postfix Expression(#2) needs lvalue.', ctx=ctx)
-            rvalue: ir.NamedValue = self.load_lvalue(v1)
-            if not isinstance(rvalue.type, ir.types.LiteralStructType):
-                raise SemanticError("Postfix expression(#4) is not literal struct.", ctx=ctx)
-            member_name = ctx.Identifier().getText()
-            ls_type: ir.LiteralStructType = rvalue.type
-            try:
-                member_index = ls_type.elements.index(member_name)
-            except ValueError:
-                raise SemanticError("Postfix expression(#4) has not such attribute.", ctx=ctx)
-            # 获得地址
-            result = builder.gep(v1.ir_value, [int32_zero, member_index], inbounds=False)
-            return TypedValue(result, result.type, constant=False, name=None, lvalue_ptr=True)
-        elif altNum == 5:   # postfixExpression '->' Identifier
-            rvalue: ir.NamedValue = self.load_lvalue(v1)    # 这里事实上获得一个指针
-            if not isinstance(rvalue.type, ir.types.PointerType):
-                raise SemanticError("Postfix expression(#5) is not pointer.", ctx=ctx)
-            # 转到结构体类型
-            pointee_type = rvalue.pointee
-            member_name = ctx.Identifier().getText()
-            ls_type: ir.LiteralStructType = pointee_type
-            try:
-                member_index = ls_type.elements.index(member_name)
-            except ValueError:
-                raise SemanticError("Postfix expression(#5) has not such attribute.", ctx=ctx)
-            # 获得地址
-            result = builder.gep(rvalue, [int32_zero, member_index], inbounds=False)
-            return TypedValue(result, result.type, constant=False, name=None, lvalue_ptr=True)
-        elif altNum == 6:   # postfixExpression '++'
-            rvalue = self.load_lvalue(v1)
-            result = builder.add(rvalue, ir.Constant(v1.type, 1))
-            self.store_lvalue(result, v1)
-            return TypedValue(rvalue, result.type, constant=False, name=None, lvalue_ptr=False)
-        elif altNum == 7:   # postfixExpression '--'
-            rvalue = self.load_lvalue(v1)
-            result = builder.sub(rvalue, ir.Constant(v1.type, 1))
-            self.store_lvalue(result, v1)
-            return TypedValue(rvalue, result.type, constant=False, name=None, lvalue_ptr=False)
+        return v1
+        # pass
+
+    def visitPostfixExpression_2(self, ctx: CCompilerParser.PostfixExpression_2Context) -> TypedValue:
+        # postfixExpression '[' expression ']'
+        v1: TypedValue = self.visit(ctx.getChild(0))
+        builder = self.builders[-1]
+        if not v1.lvalue_ptr:
+            raise SemanticError('Postfix Expression(#2) needs lvalue.', ctx=ctx)
+        is_pointer = isinstance(v1.type, ir.types.PointerType)
+        is_array = isinstance(v1.type, ir.types.ArrayType)
+        if not is_array and not is_pointer:
+            raise SemanticError("Postfix Expression is not a array or pointer.", ctx=ctx)
+        v2: TypedValue = self.visit(ctx.getChild(2))
+        # 数组地址
+        base_ptr = self.load_lvalue(v1)
+        # 偏移
+        offset = self.load_lvalue(v2)
+        result: ir.Instruction
+        if is_pointer:
+            result = builder.gep(base_ptr, [offset], inbounds=False)
+        elif is_array:
+            result = builder.gep(base_ptr, [int32_zero, offset], inbounds=True)
+        else:
+            raise SemanticError("Postfix expression(#2) is not a array or pointer.", ctx=ctx)
+        return TypedValue(result, v1.type, constant=False, name=None, lvalue_ptr=True)
+
+    def visitPostfixExpression_3(self, ctx: CCompilerParser.PostfixExpression_3Context) -> TypedValue:
+        # postfixExpression '(' argumentExpressionList? ')'
+        # TODO 跳过
+        raise SemanticError('Not implemented yet.', ctx=ctx)
+
+    def visitPostfixExpression_4(self, ctx: CCompilerParser.PostfixExpression_4Context) -> TypedValue:
+        # postfixExpression '.' Identifier
+        v1: TypedValue = self.visit(ctx.getChild(0))
+        builder = self.builders[-1]
+        if not v1.lvalue_ptr:
+            raise SemanticError('Postfix Expression(#2) needs lvalue.', ctx=ctx)
+        rvalue: ir.NamedValue = self.load_lvalue(v1)
+        if not isinstance(rvalue.type, ir.types.LiteralStructType):
+            raise SemanticError("Postfix expression(#4) is not literal struct.", ctx=ctx)
+        member_name = ctx.Identifier().getText()
+        ls_type: ir.LiteralStructType = rvalue.type
+        try:
+            member_index = ls_type.elements.index(member_name)
+        except ValueError:
+            raise SemanticError("Postfix expression(#4) has not such attribute.", ctx=ctx)
+        # 获得地址
+        result = builder.gep(v1.ir_value, [int32_zero, member_index], inbounds=False)
+        return TypedValue(result, v1.type, constant=False, name=None, lvalue_ptr=True)
+
+    def visitPostfixExpression_5(self, ctx: CCompilerParser.PostfixExpression_5Context) -> TypedValue:
+        # postfixExpression '->' Identifier
+        v1: TypedValue = self.visit(ctx.getChild(0))
+        builder = self.builders[-1]
+        rvalue: ir.NamedValue = self.load_lvalue(v1)  # 这里事实上获得一个指针
+        if not isinstance(rvalue.type, ir.types.PointerType):
+            raise SemanticError("Postfix expression(#5) is not pointer.", ctx=ctx)
+        # 转到结构体类型
+        pointee_type = rvalue.pointee
+        member_name = ctx.Identifier().getText()
+        ls_type: ir.LiteralStructType = pointee_type
+        try:
+            member_index = ls_type.elements.index(member_name)
+        except ValueError:
+            raise SemanticError("Postfix expression(#5) has not such attribute.", ctx=ctx)
+        # 获得地址
+        result = builder.gep(rvalue, [int32_zero, member_index], inbounds=False)
+        return TypedValue(result, v1.type, constant=False, name=None, lvalue_ptr=True)
+
+    def visitPostfixExpression_6(self, ctx: CCompilerParser.PostfixExpression_6Context) -> TypedValue:
+        # postfixExpression '++'
+        v1: TypedValue = self.visit(ctx.getChild(0))
+        builder = self.builders[-1]
+        rvalue = self.load_lvalue(v1)
+        result = builder.add(rvalue, ir.Constant(v1.type, 1))
+        self.store_lvalue(result, v1)
+        return TypedValue(rvalue, v1.type, constant=False, name=None, lvalue_ptr=False)
+
+    def visitPostfixExpression_7(self, ctx: CCompilerParser.PostfixExpression_7Context) -> TypedValue:
+        # postfixExpression '--'
+        v1: TypedValue = self.visit(ctx.getChild(0))
+        builder = self.builders[-1]
+        rvalue = self.load_lvalue(v1)
+        result = builder.sub(rvalue, ir.Constant(v1.type, 1))
+        self.store_lvalue(result, v1)
+        return TypedValue(rvalue, v1.type, constant=False, name=None, lvalue_ptr=False)
 
     def visitArgumentExpressionList(self, ctx: CCompilerParser.ArgumentExpressionListContext):
-        pass
-
-    def visitUnaryExpression(self, ctx: CCompilerParser.UnaryExpressionContext) -> TypedValue:
-        """
-        Unary Expression
-        """
-        altNum = ctx.getAltNumber()
+        v1: TypedValue = self.visit(ctx.getChild(0))
         builder = self.builders[-1]
-        if altNum == 1:     # postfixExpression
-            return self.visit(ctx.getChild(0))
-        elif altNum == 2:   # '++' unaryExpression
-            v1 = self.visit(ctx.unaryExpression())
-            rvalue = self.load_lvalue(v1)
-            result = builder.add(rvalue, ir.Constant(v1.type, 1))
-            self.store_lvalue(result, v1)
-            return TypedValue(result, result.type, False, name=None, lvalue_ptr=False)
-        elif altNum == 3:   # '--' unaryExpression
-            v1 = self.visit(ctx.unaryExpression())
-            rvalue = self.load_lvalue(v1)
-            result = builder.sub(rvalue, ir.Constant(v1.type, 1))
-            self.store_lvalue(result, v1)
-            return TypedValue(result, result.type, False, name=None, lvalue_ptr=False)
-        elif altNum == 4:   # unaryOperator castExpression
-            op: str = ctx.unaryOperator().getText()
-            v1 = self.visit(ctx.castExpression())
-            # '&' | '*' | '+' | '-' | '~' | '!'
-            if op == '&':
-                # builder.gep
-                # TODO 累了，我再思考
-                pass
-            elif op == '*':
-                pass
-            elif op == '+':
-                return self.visit(ctx.castExpression())
-            elif op == '-':
-                rvalue = self.load_lvalue(v1)
-                result: ir.Instruction = builder.neg(rvalue)
-                return TypedValue(result, result.type, constant=False, name=None, lvalue_ptr=False)
-            elif op == '~':
-                pass
-            elif op == '!':
-                pass
-        elif altNum == 5:   # 'sizeof' unaryExpression
-            # TODO 不知道返回什么类型
-            pass
-        elif altNum == 6:   # 'sizeof' '(' typeName ')'
-            v1 = self.visit(ctx.typeName())
-            # TODO 不知道返回什么类型
-            pass
+        # TODO 跳过
+        raise SemanticError('Not implemented yet.', ctx=ctx)
+
+    def visitUnaryExpression_1(self, ctx:CCompilerParser.UnaryExpression_1Context) -> TypedValue:
+        # postfixExpression
+        return self.visit(ctx.getChild(0))
+
+    def visitUnaryExpression_2(self, ctx:CCompilerParser.UnaryExpression_2Context) -> TypedValue:
+        # '++' unaryExpression
+        builder = self.builders[-1]
+        v1: TypedValue = self.visit(ctx.unaryExpression())
+        rvalue = self.load_lvalue(v1)
+        result = builder.add(rvalue, ir.Constant(v1.type, 1))
+        self.store_lvalue(result, v1)
+        return v1
+
+    def visitUnaryExpression_3(self, ctx:CCompilerParser.UnaryExpression_3Context) -> TypedValue:
+        # '--' unaryExpression
+        builder = self.builders[-1]
+        v1 = self.visit(ctx.unaryExpression())
+        rvalue = self.load_lvalue(v1)
+        result = builder.sub(rvalue, ir.Constant(v1.type, 1))
+        self.store_lvalue(result, v1)
+        return v1
+
+    def visitUnaryExpression_4(self, ctx:CCompilerParser.UnaryExpression_4Context) -> TypedValue:
+        # unaryOperator castExpression
+        builder = self.builders[-1]
+        op: str = ctx.unaryOperator().getText()
+        v2: TypedValue = self.visit(ctx.castExpression())
+        # '&' | '*' | '+' | '-' | '~' | '!'
+        if op == '&':
+            # 必须对左值取地址
+            if not v2.lvalue_ptr:
+                raise SemanticError('Operator & needs a lvalue.', ctx=ctx)
+            return TypedValue(v2.ir_value, v2.type.as_pointer(), constant=False, name=None, lvalue_ptr=False)
+        elif op == '*':
+            v2.lvalue_ptr = True
+            return v2
+        elif op == '+':
+            return self.visit(ctx.castExpression())
+        elif op == '-':
+            rvalue = self.load_lvalue(v2)
+            result: ir.Instruction = builder.neg(rvalue)
+            return TypedValue(result, v2.type, constant=False, name=None, lvalue_ptr=False)
+        elif op == '~':
+            rvalue = self.load_lvalue(v2)
+            result: ir.Instruction = builder.not_(rvalue)
+            return TypedValue(result, v2.type, constant=False, name=None, lvalue_ptr=False)
+        elif op == '!':
+            rvalue = self.load_lvalue(v2)
+            new_v1, new_v2, new_type = self.bit_extend(rvalue, int32_zero)
+            if new_type == double:
+                result: ir.Instruction = builder.fcmp_ordered('==', new_v1, new_v2)
+            else:
+                result: ir.Instruction = builder.icmp_signed('==', new_v1, new_v2)
+            return TypedValue(result, int1, constant=False, name=None, lvalue_ptr=False)
+
+    def visitUnaryExpression_5(self, ctx:CCompilerParser.UnaryExpression_5Context) -> TypedValue:
+        # 'sizeof' unaryExpression
+        # TODO 不知道返回什么类型
+        raise SemanticError('Not implemented yet.', ctx=ctx)
+
+    def visitUnaryExpression_6(self, ctx:CCompilerParser.UnaryExpression_6Context) -> TypedValue:
+        # 'sizeof' '(' typeName ')'
+        # TODO 不知道返回什么类型
+        raise SemanticError('Not implemented yet.', ctx=ctx)
 
     def save(self, filename: str) -> None:
         """
