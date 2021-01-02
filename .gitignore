@@ -149,20 +149,19 @@ cython_debug/
 # vscode
 .vscode/
 
-# makefile
-[Mm]akefile
-
 # antlr generated code
-**/cparser/*.interp
-**/cparser/*.tokens
+*.interp
+*.tokens
+**/_cpreprocess/*Lexer.py
+**/_cpreprocess/*Parser.py
+**/_cpreprocess/*Listener.py
 **/cparser/*Lexer.py
 **/cparser/*Parser.py
 **/cparser/*Visitor.py
-**/cparser/*Listener.py
-_cpreprocess/
-!_cpreprocess/*.g4
-!_cpreprocess/__init__.py
 
 # temporary test files
 *.c
-!**/test/*
+!**/test/*.c
+
+# Makefile
+[Mm]akefile
