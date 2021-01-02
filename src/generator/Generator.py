@@ -1770,6 +1770,7 @@ class Visitor(CCompilerVisitor):
             raise SemanticError("返回类型未指定", ctx)
         declarator_func = self.visit(ctx.declarator())
         function_name, function_type, parameter_list = declarator_func(ret_type)
+        parameter_list: ParameterList
 
         # 判断重定义，存储函数
         if function_name in self.functions:
@@ -1787,6 +1788,9 @@ class Visitor(CCompilerVisitor):
         # 函数 block
         block: ir.Block = llvm_function.append_basic_block(name=function_name + '.entry')
         self.functions[function_name] = llvm_function
+        result = self.symbol_table.add_item(function_name, llvm_function)
+        if not result.success:
+            raise SemanticError('函数重定义: ' + function_name, ctx)
 
         ir_builder: ir.IRBuilder = ir.IRBuilder(block)
         self.blocks.append(block)
@@ -1801,7 +1805,11 @@ class Visitor(CCompilerVisitor):
             func_arg = llvm_function.args[i]
             variable = ir_builder.alloca(func_arg.type)
             ir_builder.store(func_arg, variable)
-            result = self.symbol_table.add_item(func_arg.name, TypedValue(variable, func_arg.type, False))
+            result = self.symbol_table.add_item(func_arg.name, TypedValue(ir_value=variable,
+                                                                          typ=func_arg.type,
+                                                                          constant=False,
+                                                                          lvalue_ptr=True,
+                                                                          name=parameter_list[i][1]))
             if not result.success:
                 raise SemanticError(ctx=ctx, msg=result.message)
 
@@ -2014,13 +2022,14 @@ class Visitor(CCompilerVisitor):
                     if isinstance(typ, ir.FunctionType):
                         variable = ir.Function(self.module, typ, identifier)
                         self.functions[identifier] = variable
+                        result = self.symbol_table.add_item(identifier, variable)
                     else:
                         variable = ir.GlobalVariable(self.module, typ, identifier)
-                    self.symbol_table.add_item(identifier, TypedValue(ir_value=variable,
-                                                                      typ=typ,
-                                                                      constant=False,
-                                                                      name=identifier,
-                                                                      lvalue_ptr=True))
+                        self.symbol_table.add_item(identifier, TypedValue(ir_value=variable,
+                                                                          typ=typ,
+                                                                          constant=False,
+                                                                          name=identifier,
+                                                                          lvalue_ptr=True))
                 else:
                     ir_builder = self.builders[-1]
                     variable = ir_builder.alloca(typ, 1, identifier)
@@ -2031,8 +2040,9 @@ class Visitor(CCompilerVisitor):
                                                                                lvalue_ptr=True))
                     if not result.success:
                         raise SemanticError("Symbol redefined: " + identifier, ctx)
-                    value = self.load_lvalue(initializer)
-                    ir_builder.store(value, variable)
+                    if initializer:
+                        value = self.load_lvalue(initializer)
+                        ir_builder.store(value, variable)
 
     def visitInitDeclarator(self, ctx: CCompilerParser.InitDeclaratorContext):
         """
@@ -2180,16 +2190,36 @@ class Visitor(CCompilerVisitor):
             base_type = base_type.as_pointer()
         return base_type
 
+    def visitJumpStatement_1(self, ctx: CCompilerParser.JumpStatement_1Context) -> None:
+        # jumpStatement : 'continue' ';'
+        raise SemanticError("Not implemented", ctx)
+        pass
+
+    def visitJumpStatement_2(self, ctx: CCompilerParser.JumpStatement_2Context) -> None:
+        # jumpStatement : 'break' ';'
+        raise SemanticError("Not implemented", ctx)
+        pass
+
+    def visitJumpStatement_3(self, ctx: CCompilerParser.JumpStatement_3Context) -> None:
+        # jumpStatement : 'return' expression? ';'
+        ret_value_ctx = ctx.expression()
+        ret_value = None
+        if ret_value_ctx is not None:
+            ret_value = self.visit(ret_value_ctx)
+        builder = self.builders[-1]
+        builder.ret(self.load_lvalue(ret_value))
+
     def load_lvalue(self, lvalue_ptr: TypedValue) -> Union[ir.Value, ir.NamedValue]:
         """
         从左值地址加载出一个值.
+        如果是数组，不会被加载. 不要试图加载数组.
 
         :param lvalue_ptr: 待加载的值
         :type lvalue_ptr: TypedValue
         :return: 如果这个值是右值，返回原始值，否则返回加载后的值
         :rtype: ir.Value
         """
-        if not lvalue_ptr.lvalue_ptr:
+        if not lvalue_ptr.lvalue_ptr or isinstance(lvalue_ptr.type, ir.ArrayType):
             return lvalue_ptr.ir_value
         builder = self.builders[-1]
         return builder.load(lvalue_ptr.ir_value)
@@ -2291,21 +2321,22 @@ class Visitor(CCompilerVisitor):
         :rtype:
         """
         builder = self.builders[-1]
+        ir_value = self.load_lvalue(value)
         if value.type in int_types:
             if type in int_types:
                 if type.width <= value.type.width:
-                    return builder.trunc(value.ir_value, type)
+                    return builder.trunc(ir_value, type)
                 else:
-                    return builder.sext(value.ir_value, type)
+                    return builder.sext(ir_value, type)
             elif type == double:
-                return builder.sitofp(value.ir_value, type)
+                return builder.sitofp(ir_value, type)
             elif type.is_pointer:
-                return builder.inttoptr(value.ir_value, type)
+                return builder.inttoptr(ir_value, type)
             else:
                 raise SemanticError('Not supported type conversion.', ctx=ctx)
         elif value.type == double:
             if type in int_types:
-                return builder.fptosi(value.ir_value, type)
+                return builder.fptosi(ir_value, type)
             elif type == double:
                 return value.ir_value
             elif type.is_pointer:
@@ -2314,11 +2345,20 @@ class Visitor(CCompilerVisitor):
                 raise SemanticError('Not supported type conversion.', ctx=ctx)
         elif value.type.is_pointer:
             if type in int_types:
-                return builder.ptrtoint(value.ir_value, type)
+                return builder.ptrtoint(ir_value, type)
             elif type == double:
                 raise SemanticError('Illegal type conversion.', ctx=ctx)
             elif type.is_pointer:
-                return builder.bitcast(value, type)
+                return builder.bitcast(ir_value, type)
+            else:
+                raise SemanticError('Not supported type conversion.', ctx=ctx)
+        elif isinstance(value.type, ir.ArrayType):
+            if type.is_pointer:
+                type: ir.PointerType
+                value_type: ir.ArrayType = value.type
+                if type.pointee != value_type.element:
+                    raise SemanticError(f'Invalid conversion from {value_type} to {type}.', ctx=ctx)
+                return builder.gep(ir_value, [int32_zero, int32_zero], inbounds=False)
             else:
                 raise SemanticError('Not supported type conversion.', ctx=ctx)
         else:
@@ -2402,16 +2442,46 @@ class Visitor(CCompilerVisitor):
         result: ir.Instruction
         if is_pointer:
             result = builder.gep(base_ptr, [offset], inbounds=False)
+            result_type = v1.type.pointee
         elif is_array:
             result = builder.gep(base_ptr, [int32_zero, offset], inbounds=True)
+            result_type = v1.type.element
         else:
             raise SemanticError("Postfix expression(#2) is not a array or pointer.", ctx=ctx)
-        return TypedValue(result, v1.type, constant=False, name=None, lvalue_ptr=True)
+        return TypedValue(result, result_type, constant=False, name=None, lvalue_ptr=True)
 
     def visitPostfixExpression_3(self, ctx: CCompilerParser.PostfixExpression_3Context) -> TypedValue:
         # postfixExpression '(' argumentExpressionList? ')'
-        # TODO 跳过
-        raise SemanticError('Not implemented yet.', ctx=ctx)
+        # 函数调用
+        func = self.visit(ctx.postfixExpression())
+        if func is None or not isinstance(func, ir.Function):
+            raise SemanticError('Function not declared')
+        func: ir.Function
+        builder = self.builders[-1]
+        if ctx.argumentExpressionList():
+            argument_expressions = self.visit(ctx.argumentExpressionList())
+        else:
+            argument_expressions = []
+        func_args = []
+        func_arg_count = len(func.args)
+        if func.function_type.var_arg:
+            if len(argument_expressions) < func_arg_count:
+                raise SemanticError("Too few arguments")
+        else:
+            if len(argument_expressions) != func_arg_count:
+                raise SemanticError("Incorrect number of arguments")
+        for i in range(len(argument_expressions)):
+            if i < func_arg_count:
+                func_args.append(self.convert_type(argument_expressions[i], func.args[i].type, ctx))
+            else:
+                if isinstance(argument_expressions[i].type, ir.ArrayType):
+                    func_args.append(self.convert_type(argument_expressions[i],
+                                                       argument_expressions[i].type.element.pointer,
+                                                       ctx))
+                else:
+                    func_args.append(self.load_lvalue(argument_expressions[i]))
+        ret_value = builder.call(func, func_args)
+        return TypedValue(ir_value=ret_value, typ=ret_value.type, constant=False, name=None, lvalue_ptr=False)
 
     def visitPostfixExpression_4(self, ctx: CCompilerParser.PostfixExpression_4Context) -> TypedValue:
         # postfixExpression '.' Identifier
@@ -2471,11 +2541,22 @@ class Visitor(CCompilerVisitor):
         self.store_lvalue(result, v1)
         return TypedValue(rvalue, v1.type, constant=False, name=None, lvalue_ptr=False)
 
-    def visitArgumentExpressionList(self, ctx: CCompilerParser.ArgumentExpressionListContext):
-        v1: TypedValue = self.visit(ctx.getChild(0))
-        builder = self.builders[-1]
-        # TODO 跳过
-        raise SemanticError('Not implemented yet.', ctx=ctx)
+    def visitArgumentExpressionList(self, ctx: CCompilerParser.ArgumentExpressionListContext) -> List[TypedValue]:
+        """
+        语法规则:
+        argumentExpressionList
+            :   assignmentExpression
+            |   argumentExpressionList ',' assignmentExpression
+            ;
+        @return: expression 的计算结果列表
+        """
+        arg_expr_list_ctx = ctx.argumentExpressionList()
+        if arg_expr_list_ctx is not None:
+            arg_expr_list = self.visit(ctx.argumentExpressionList())
+        else:
+            arg_expr_list = []
+        arg_expr_list.append(self.visit(ctx.assignmentExpression()))
+        return arg_expr_list
 
     def visitUnaryExpression_1(self, ctx:CCompilerParser.UnaryExpression_1Context) -> TypedValue:
         # postfixExpression
@@ -2514,12 +2595,12 @@ class Visitor(CCompilerVisitor):
             pointer_type: ir.PointerType = v2.type
             if not pointer_type.is_pointer:
                 raise SemanticError('Operator * needs a pointer.', ctx=ctx)
-            if not v2.lvalue_ptr:
-                return TypedValue(v2.ir_value, pointer_type.pointee, constant=False, name=None, lvalue_ptr=True)
-            else:
+            if v2.lvalue_ptr:
                 # v2 是存放指针类型的左值时
                 ptr_value = self.load_lvalue(v2)
                 return TypedValue(ptr_value, pointer_type.pointee, constant=False, name=None, lvalue_ptr=True)
+            else:
+                return TypedValue(v2.ir_value, pointer_type.pointee, constant=False, name=None, lvalue_ptr=True)
         elif op == '+':
             return self.visit(ctx.castExpression())
         elif op == '-':

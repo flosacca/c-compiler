@@ -37,9 +37,10 @@ class DeclarationSpecifiers:
 
     def is_typedef(self):
         for (typ, val) in self.specifiers:
-            if typ == "storage" and val =="typedef":
+            if typ == "storage" and val == "typedef":
                 return True
         return False
+
 
 class ParameterList:
 
@@ -103,7 +104,7 @@ class SymbolTable:
         self.table: List[Dict[str, Union[TypedValue, ir.Type]]] = [{}]
         self.current_level: int = 0
 
-    def get_item(self, item: str) -> Optional[Union[TypedValue, ir.Type]]:
+    def get_item(self, item: str) -> Optional[Union[TypedValue, ir.Type, ir.Function]]:
         """
         从符号表中获取元素.
 
@@ -118,7 +119,7 @@ class SymbolTable:
                 return self.table[i][item]
         return None
 
-    def add_item(self, key: str, value: Union[TypedValue, ir.Type]) -> Result[None]:
+    def add_item(self, key: str, value: Union[TypedValue, ir.Type, ir.Function]) -> Result[None]:
         """
         向符号表中添加元素.
 

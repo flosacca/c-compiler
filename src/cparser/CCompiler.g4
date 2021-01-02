@@ -148,11 +148,18 @@ translationUnit : functionDefinition | declaration | ';' ;
 
 statement
     : expressionStatement
-    | compoundStatement;
+    | compoundStatement
+    | jumpStatement;
 
 expressionStatement : expression ';' ;
 
 compoundStatement : '{' statementList '}';
+
+jumpStatement
+    :   'continue' ';'              # jumpStatement_1
+    |   'break' ';'                 # jumpStatement_2
+    |   'return' expression? ';'    # jumpStatement_3
+    ;
 
 // simplified
 statementList : (statement | declaration)*;
