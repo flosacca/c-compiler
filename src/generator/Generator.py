@@ -1705,6 +1705,12 @@ class Visitor(CCompilerVisitor):
     #
     # }}} Old code
 
+    def is_global_scope(self) -> bool:
+        """
+        当前是否在全局作用域下.
+        """
+        return self.symbol_table.is_global()
+
     def visitProg(self, ctx: CCompilerParser.ProgContext) -> None:
         """
         代码主文件.
@@ -1761,7 +1767,7 @@ class Visitor(CCompilerVisitor):
         """
         ret_type: ir.Type = self.visit(ctx.typeSpecifier())
         if ret_type is None:
-            raise SemanticError(ctx, "返回类型未指定")
+            raise SemanticError("返回类型未指定", ctx)
         declarator_func = self.visit(ctx.declarator())
         function_name, function_type, parameter_list = declarator_func(ret_type)
 
@@ -1809,20 +1815,20 @@ class Visitor(CCompilerVisitor):
         self.symbol_table.quit_scope()
         return
 
-    def visitDirectDeclarator1(self, ctx: CCompilerParser.DirectDeclarator1Context):
+    def visitDirectDeclarator_1(self, ctx: CCompilerParser.DirectDeclarator_1Context):
         """
         directDeclarator : Identifier
         """
         identifier = ctx.getText()
         return lambda typ: (identifier, typ, None)
 
-    def visitDirectDeclarator2(self, ctx: CCompilerParser.DirectDeclarator2Context):
+    def visitDirectDeclarator_2(self, ctx: CCompilerParser.DirectDeclarator_2Context):
         """
         directDeclarator : '(' declarator ')'
         """
         return self.visit(ctx.declarator())
 
-    def visitDirectDeclarator3(self, ctx: CCompilerParser.DirectDeclarator3Context):
+    def visitDirectDeclarator_3(self, ctx: CCompilerParser.DirectDeclarator_3Context):
         """
         directDeclarator : directDeclarator '[' assignmentExpression? ']'
         """
@@ -1832,7 +1838,7 @@ class Visitor(CCompilerVisitor):
             if isinstance(exp_const, ir.Constant):
                 arr_len = exp_const.constant
             else:
-                raise SemanticError(ctx, "数组的长度必须是常量表达式")
+                raise SemanticError("数组的长度必须是常量表达式", ctx)
         declarator_func = self.visit(ctx.directDeclarator())
 
         def create_arr_ret(typ: ir.Type):
@@ -1841,7 +1847,7 @@ class Visitor(CCompilerVisitor):
 
         return create_arr_ret
 
-    def visitDirectDeclarator4(self, ctx: CCompilerParser.DirectDeclarator4Context):
+    def visitDirectDeclarator_4(self, ctx: CCompilerParser.DirectDeclarator_4Context):
         """
         directDeclarator : directDeclarator '(' parameterTypeList ')'
         """
@@ -1891,7 +1897,7 @@ class Visitor(CCompilerVisitor):
         specifiers: DeclarationSpecifiers = self.visit(ctx.declarationSpecifiers())
         base_type = specifiers.get_type()
         if base_type is None:
-            raise SemanticError(ctx, "未指定类型")
+            raise SemanticError("未指定类型", ctx)
         declarator_func = self.visit(ctx.declarator())
         identifier, typ, parameter_list = declarator_func(base_type)
         if isinstance(typ, ir.ArrayType):
@@ -1984,7 +1990,91 @@ class Visitor(CCompilerVisitor):
         Returns:
             None
         """
-        pass
+        specifiers: DeclarationSpecifiers = self.visit(ctx.declarationSpecifiers())
+        init_decl_list = self.visit(ctx.initDeclaratorList())
+        base_type = specifiers.get_type()
+        if base_type is None:
+            raise SemanticError("Unspecified declarator type", ctx)
+        for decl, initializer in init_decl_list:
+            identifier, typ, parameter_list = decl(base_type)
+            if specifiers.is_typedef():
+                if initializer is not None:
+                    raise SemanticError("Illegal initializer (only variables can be initialized)", ctx)
+                result = self.symbol_table.add_item(identifier, typ)
+                if not result.success:
+                    raise SemanticError("Symbol redefined: " + identifier, ctx)
+                # todo: delete debug log
+                print("using type", identifier, "=", typ)
+            else:
+                if self.is_global_scope():
+                    if initializer is not None:
+                        raise SemanticError("Cannot initialize global variable(s)", ctx)
+                    if self.symbol_table.exist(identifier):
+                        raise SemanticError("Symbol redefined: " + identifier, ctx)
+                    if isinstance(typ, ir.FunctionType):
+                        variable = ir.Function(self.module, typ, identifier)
+                        self.functions[identifier] = variable
+                    else:
+                        variable = ir.GlobalVariable(self.module, typ, identifier)
+                    self.symbol_table.add_item(identifier, TypedValue(ir_value=variable,
+                                                                      typ=typ,
+                                                                      constant=False,
+                                                                      name=identifier,
+                                                                      lvalue_ptr=True))
+                else:
+                    ir_builder = self.builders[-1]
+                    variable = ir_builder.alloca(typ, 1, identifier)
+                    result = self.symbol_table.add_item(identifier, TypedValue(ir_value=variable,
+                                                                               typ=typ,
+                                                                               constant=False,
+                                                                               name=identifier,
+                                                                               lvalue_ptr=True))
+                    if not result.success:
+                        raise SemanticError("Symbol redefined: " + identifier, ctx)
+
+    def visitInitDeclarator(self, ctx: CCompilerParser.InitDeclaratorContext):
+        """
+        初始化声明.
+
+        语法规则:
+            initDeclarator
+                :   declarator
+                |   declarator '=' initializer
+                ;
+        Returns:
+            lambda typ : (str, ir.Type, Optional[ParameterList])
+                str: 标识符
+                ir.Type: 类型
+                Optional[ParameterList]: 参数列表 (对于函数声明/定义有效)
+            initializer: ir.Value
+        """
+        declarator = self.visit(ctx.declarator())
+        initializer_ctx = ctx.initializer()
+        if initializer_ctx is not None:
+            initializer = self.visit(ctx.initializer())
+        else:
+            initializer = None
+        return declarator, initializer
+
+    def visitInitDeclaratorList(self, ctx: CCompilerParser.InitDeclaratorListContext) -> List[tuple]:
+        """
+        初始化声明列表.
+
+        语法规则:
+            initDeclaratorList
+                :   initDeclarator
+                |   initDeclaratorList ',' initDeclarator
+                ;
+        Returns:
+            List[tuple]: 一串初始化声明，列表的成员定义见 Generator#visitInitDeclarator
+        """
+        init_declarator_list_ctx = ctx.initDeclaratorList()
+        if init_declarator_list_ctx is not None:
+            init_declarator_list = self.visit(ctx.initDeclaratorList())
+        else:
+            init_declarator_list = []
+        init_declarator_list.append(self.visit(ctx.initDeclarator()))
+        return init_declarator_list
 
     def visitQualifiedPointer(self, ctx: CCompilerParser.QualifiedPointerContext) -> Dict[str, bool]:
         """
@@ -2066,34 +2156,27 @@ class Visitor(CCompilerVisitor):
         """
         return ctx.getText()
 
-    def visitTypeSpecifier(self, ctx: CCompilerParser.TypeSpecifierContext) -> ir.Type:
-        """
-        Type Specifier
+    def visitTypeSpecifier_1(self, ctx: CCompilerParser.TypeSpecifier_3Context) -> ir.Type:
+        # typeSpecifier : primitiveType
+        return self.visit(ctx.primitiveType())
 
-        语法规则:
-            typeSpecifier
-                :   primitiveType
-                |   typedefName
-                |   typeSpecifier pointer
-                ;
-        """
-        altNum = ctx.getAltNumber()
-        if altNum == 1:
-            return self.visit(ctx.primitiveType())
-        if altNum == 2:
-            type_id: str = ctx.getText()
-            actual_type = self.symbol_table.get_item(type_id)
-            if actual_type is None:
-                raise SemanticError(ctx, "未定义的类型: " + type_id)
-            if not isinstance(actual_type, ir.Type):
-                raise SemanticError(ctx, "不是合法的类型: " + type_id)
-            return actual_type
-        if altNum == 3:
-            base_type: ir.Type = self.visit(ctx.typeSpecifier())
-            pointer_list: list = self.visit(ctx.pointer())
-            for _ in pointer_list:  # const 之类的访问修饰符被省略
-                base_type = base_type.as_pointer()
-            return base_type
+    def visitTypeSpecifier_2(self, ctx: CCompilerParser.TypeSpecifier_2Context) -> ir.Type:
+        # typeSpecifier : typedefName
+        type_id: str = ctx.getText()
+        actual_type = self.symbol_table.get_item(type_id)
+        if actual_type is None:
+            raise SemanticError("Undefined type: " + type_id, ctx)
+        if not isinstance(actual_type, ir.Type):
+            raise SemanticError("Invalid type: " + type_id, ctx)
+        return actual_type
+
+    def visitTypeSpecifier_3(self, ctx: CCompilerParser.TypeSpecifier_1Context) -> ir.Type:
+        # typeSpecifier : typeSpecifier pointer
+        base_type: ir.Type = self.visit(ctx.typeSpecifier())
+        pointer_list: list = self.visit(ctx.pointer())
+        for _ in pointer_list:  # const 之类的访问修饰符被省略
+            base_type = base_type.as_pointer()
+        return base_type
 
     def load_lvalue(self, lvalue_ptr: TypedValue) -> Union[ir.Value, ir.NamedValue]:
         """
@@ -2136,7 +2219,8 @@ class Visitor(CCompilerVisitor):
             return self.string_constants[str_value]
         str_bytes = bytearray(str_value + "\0", "utf-8")
         variable_name = ".str" + str(len(self.string_constants))
-        ir_value = ir.GlobalVariable(ir.ArrayType(int8, len(str_bytes)), str_bytes, variable_name)
+        ir_value = ir.GlobalVariable(self.module, ir.ArrayType(int8, len(str_bytes)), variable_name)
+        ir_value.initializer = ir.Constant(ir.ArrayType(int8, len(str_bytes)), str_bytes)
         typed_value = TypedValue(ir_value, typ=ir_value.type, constant=True)
         self.string_constants[str_value] = typed_value
         return typed_value

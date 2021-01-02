@@ -359,10 +359,10 @@ parameterDeclaration
     ;
 
 directDeclarator
-    :   Identifier                                      # directDeclarator1
-    |   '(' declarator ')'                              # directDeclarator2
-    |   directDeclarator '[' assignmentExpression? ']'  # directDeclarator3
-    |   directDeclarator '(' parameterTypeList ')'      # directDeclarator4
+    :   Identifier                                      # directDeclarator_1
+    |   '(' declarator ')'                              # directDeclarator_2
+    |   directDeclarator '[' assignmentExpression? ']'  # directDeclarator_3
+    |   directDeclarator '(' parameterTypeList ')'      # directDeclarator_4
     ;
 
 declarator
@@ -370,9 +370,9 @@ declarator
     ;
 
 typeSpecifier
-    :   primitiveType
-    |   typedefName
-    |   typeSpecifier pointer
+    :   primitiveType           # typeSpecifier_1
+    |   typedefName             # typeSpecifier_2
+    |   typeSpecifier pointer   # typeSpecifier_3
     ;
 
 primitiveType

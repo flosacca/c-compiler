@@ -1,10 +1,11 @@
+from antlr4 import ParserRuleContext
 from antlr4.error.ErrorListener import ErrorListener
 
 
 class SemanticError(Exception):
     """语义错误基类"""
 
-    def __init__(self, msg, ctx=None):
+    def __init__(self, msg: str, ctx: ParserRuleContext = None):
         super().__init__()
         if ctx:
             self.line = ctx.start.line  # 错误出现位置
