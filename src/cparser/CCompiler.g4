@@ -200,66 +200,66 @@ unaryOperator
     ;
 
 castExpression
-    :   '(' typeName ')' castExpression
-    |   unaryExpression
+    :   '(' typeName ')' castExpression         # castExpression_1
+    |   unaryExpression                         # castExpression_2
     ;
 
 multiplicativeExpression
-    :   castExpression
-    |   multiplicativeExpression '*' castExpression
-    |   multiplicativeExpression '/' castExpression
-    |   multiplicativeExpression '%' castExpression
+    :   castExpression                                  # multiplicativeExpression_1
+    |   multiplicativeExpression '*' castExpression     # multiplicativeExpression_2
+    |   multiplicativeExpression '/' castExpression     # multiplicativeExpression_3
+    |   multiplicativeExpression '%' castExpression     # multiplicativeExpression_4
     ;
 
 additiveExpression
-    :   multiplicativeExpression
-    |   additiveExpression '+' multiplicativeExpression
-    |   additiveExpression '-' multiplicativeExpression
+    :   multiplicativeExpression                            # additiveExpression_1
+    |   additiveExpression '+' multiplicativeExpression     # additiveExpression_2
+    |   additiveExpression '-' multiplicativeExpression     # additiveExpression_3
     ;
 
 shiftExpression
-    :   additiveExpression
-    |   shiftExpression '<<' additiveExpression
-    |   shiftExpression '>>' additiveExpression
+    :   additiveExpression                          # shiftExpression_1
+    |   shiftExpression '<<' additiveExpression     # shiftExpression_2
+    |   shiftExpression '>>' additiveExpression     # shiftExpression_3
     ;
 
 relationalExpression
-    :   shiftExpression
-    |   relationalExpression '<' shiftExpression
-    |   relationalExpression '>' shiftExpression
-    |   relationalExpression '<=' shiftExpression
-    |   relationalExpression '>=' shiftExpression
+    :   shiftExpression                                 # relationalExpression_1
+    |   relationalExpression '<' shiftExpression        # relationalExpression_2
+    |   relationalExpression '>' shiftExpression        # relationalExpression_3
+    |   relationalExpression '<=' shiftExpression       # relationalExpression_4
+    |   relationalExpression '>=' shiftExpression       # relationalExpression_5
     ;
 
 equalityExpression
-    :   relationalExpression
-    |   equalityExpression '==' relationalExpression
-    |   equalityExpression '!=' relationalExpression
+    :   relationalExpression                            # equalityExpression_1
+    |   equalityExpression '==' relationalExpression    # equalityExpression_2
+    |   equalityExpression '!=' relationalExpression    # equalityExpression_3
     ;
 
 andExpression
-    :   equalityExpression
-    |   andExpression '&' equalityExpression
+    :   equalityExpression                              # andExpression_1
+    |   andExpression '&' equalityExpression            # andExpression_2
     ;
 
 exclusiveOrExpression
-    :   andExpression
-    |   exclusiveOrExpression '^' andExpression
+    :   andExpression                                   # exclusiveOrExpression_1
+    |   exclusiveOrExpression '^' andExpression         # exclusiveOrExpression_2
     ;
 
 inclusiveOrExpression
-    :   exclusiveOrExpression
-    |   inclusiveOrExpression '|' exclusiveOrExpression
+    :   exclusiveOrExpression                           # inclusiveOrExpression_1
+    |   inclusiveOrExpression '|' exclusiveOrExpression # inclusiveOrExpression_2
     ;
 
 logicalAndExpression
-    :   inclusiveOrExpression
-    |   logicalAndExpression '&&' inclusiveOrExpression
+    :   inclusiveOrExpression                           # logicalAndExpression_1
+    |   logicalAndExpression '&&' inclusiveOrExpression # logicalAndExpression_2
     ;
 
 logicalOrExpression
-    :   logicalAndExpression
-    |   logicalOrExpression '||' logicalAndExpression
+    :   logicalAndExpression                            # logicalOrExpression_1
+    |   logicalOrExpression '||' logicalAndExpression   # logicalOrExpression_2
     ;
 
 conditionalExpression
@@ -267,8 +267,8 @@ conditionalExpression
     ;
 
 assignmentExpression
-    :   conditionalExpression
-    |   unaryExpression assignmentOperator assignmentExpression
+    :   conditionalExpression                                       # assignmentExpression_1
+    |   unaryExpression assignmentOperator assignmentExpression     # assignmentExpression_2
     ;
 
 assignmentOperator
@@ -276,8 +276,8 @@ assignmentOperator
     ;
 
 expression
-    :   assignmentExpression
-    |   expression ',' assignmentExpression
+    :   assignmentExpression                    # expression_1
+    |   expression ',' assignmentExpression     # expression_2
     ;
 
 constantExpression

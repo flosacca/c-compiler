@@ -18,6 +18,8 @@ int32 = ir.IntType(32)
 int8 = ir.IntType(8)
 void = ir.VoidType()
 
+int_types = [int1, int8, int32]
+
 int32_zero = ir.Constant(int32, 0)
 
 
@@ -2139,6 +2141,24 @@ class Visitor(CCompilerVisitor):
         self.string_constants[str_value] = typed_value
         return typed_value
 
+    def judge_zero(self, value: TypedValue) -> TypedValue:
+        """
+        判断一个 value 是否为 0，用于 '!' '&&' '||' 运算符.
+
+        :param value:
+        :type value:
+        :return:
+        :rtype:
+        """
+        builder = self.builders[-1]
+        rvalue = self.load_lvalue(value)
+        new_v1, new_v2, new_type = self.bit_extend(rvalue, int32_zero)
+        if new_type == double:
+            result: ir.Instruction = builder.fcmp_ordered('==', new_v1, new_v2)
+        else:
+            result: ir.Instruction = builder.icmp_signed('==', new_v1, new_v2)
+        return TypedValue(result, int1, constant=False, name=None, lvalue_ptr=False)
+
     def bit_extend(self, value1, value2, ctx=None) -> Tuple[Any, Any, ir.Type]:
         """
         将 value1 和 value2 拓展成相同的位数, 都为 ir.Value.
@@ -2170,6 +2190,53 @@ class Visitor(CCompilerVisitor):
             return new_v1, new_v2, new_type
 
         raise SemanticError('Bit extend error.', ctx=ctx)
+
+    def convert_type(self, value: TypedValue, type: ir.Type, ctx=None) -> ir.Value:
+        """
+        将 ir_value 转为 type 类型.
+
+        :param value:
+        :type value:
+        :param type:
+        :type type:
+        :param ctx:
+        :type ctx:
+        :return: 转换后的 ir.Value
+        :rtype:
+        """
+        builder = self.builders[-1]
+        if value.type in int_types:
+            if type in int_types:
+                if type.width <= value.type.width:
+                    return builder.trunc(value.ir_value, type)
+                else:
+                    return builder.sext(value.ir_value, type)
+            elif type == double:
+                return builder.sitofp(value.ir_value, type)
+            elif type.is_pointer:
+                return builder.inttoptr(value.ir_value, type)
+            else:
+                raise SemanticError('Not supported type conversion.', ctx=ctx)
+        elif value.type == double:
+            if type in int_types:
+                return builder.fptosi(value.ir_value, type)
+            elif type == double:
+                return value.ir_value
+            elif type.is_pointer:
+                raise SemanticError('Illegal type conversion.', ctx=ctx)
+            else:
+                raise SemanticError('Not supported type conversion.', ctx=ctx)
+        elif value.type.is_pointer:
+            if type in int_types:
+                return builder.ptrtoint(value.ir_value, type)
+            elif type == double:
+                raise SemanticError('Illegal type conversion.', ctx=ctx)
+            elif type.is_pointer:
+                return builder.bitcast(value, type)
+            else:
+                raise SemanticError('Not supported type conversion.', ctx=ctx)
+        else:
+            raise SemanticError('Not supported type conversion.', ctx=ctx)
 
     def visitStringLiteral(self, ctx: CCompilerParser.StringLiteralContext) -> str:
         """
@@ -2273,11 +2340,12 @@ class Visitor(CCompilerVisitor):
         ls_type: ir.LiteralStructType = rvalue.type
         try:
             member_index = ls_type.elements.index(member_name)
+            member_type = ls_type.elements[member_index]
         except ValueError:
             raise SemanticError("Postfix expression(#4) has not such attribute.", ctx=ctx)
         # 获得地址
         result = builder.gep(v1.ir_value, [int32_zero, member_index], inbounds=False)
-        return TypedValue(result, v1.type, constant=False, name=None, lvalue_ptr=True)
+        return TypedValue(result, member_type, constant=False, name=None, lvalue_ptr=True)
 
     def visitPostfixExpression_5(self, ctx: CCompilerParser.PostfixExpression_5Context) -> TypedValue:
         # postfixExpression '->' Identifier
@@ -2292,11 +2360,12 @@ class Visitor(CCompilerVisitor):
         ls_type: ir.LiteralStructType = pointee_type
         try:
             member_index = ls_type.elements.index(member_name)
+            member_type = ls_type.elements[member_index]
         except ValueError:
             raise SemanticError("Postfix expression(#5) has not such attribute.", ctx=ctx)
         # 获得地址
         result = builder.gep(rvalue, [int32_zero, member_index], inbounds=False)
-        return TypedValue(result, v1.type, constant=False, name=None, lvalue_ptr=True)
+        return TypedValue(result, member_type, constant=False, name=None, lvalue_ptr=True)
 
     def visitPostfixExpression_6(self, ctx: CCompilerParser.PostfixExpression_6Context) -> TypedValue:
         # postfixExpression '++'
@@ -2328,8 +2397,8 @@ class Visitor(CCompilerVisitor):
 
     def visitUnaryExpression_2(self, ctx:CCompilerParser.UnaryExpression_2Context) -> TypedValue:
         # '++' unaryExpression
-        builder = self.builders[-1]
         v1: TypedValue = self.visit(ctx.unaryExpression())
+        builder = self.builders[-1]
         rvalue = self.load_lvalue(v1)
         result = builder.add(rvalue, ir.Constant(v1.type, 1))
         self.store_lvalue(result, v1)
@@ -2337,8 +2406,8 @@ class Visitor(CCompilerVisitor):
 
     def visitUnaryExpression_3(self, ctx:CCompilerParser.UnaryExpression_3Context) -> TypedValue:
         # '--' unaryExpression
-        builder = self.builders[-1]
         v1 = self.visit(ctx.unaryExpression())
+        builder = self.builders[-1]
         rvalue = self.load_lvalue(v1)
         result = builder.sub(rvalue, ir.Constant(v1.type, 1))
         self.store_lvalue(result, v1)
@@ -2346,9 +2415,9 @@ class Visitor(CCompilerVisitor):
 
     def visitUnaryExpression_4(self, ctx:CCompilerParser.UnaryExpression_4Context) -> TypedValue:
         # unaryOperator castExpression
-        builder = self.builders[-1]
         op: str = ctx.unaryOperator().getText()
         v2: TypedValue = self.visit(ctx.castExpression())
+        builder = self.builders[-1]
         # '&' | '*' | '+' | '-' | '~' | '!'
         if op == '&':
             # 必须对左值取地址
@@ -2369,13 +2438,7 @@ class Visitor(CCompilerVisitor):
             result: ir.Instruction = builder.not_(rvalue)
             return TypedValue(result, v2.type, constant=False, name=None, lvalue_ptr=False)
         elif op == '!':
-            rvalue = self.load_lvalue(v2)
-            new_v1, new_v2, new_type = self.bit_extend(rvalue, int32_zero)
-            if new_type == double:
-                result: ir.Instruction = builder.fcmp_ordered('==', new_v1, new_v2)
-            else:
-                result: ir.Instruction = builder.icmp_signed('==', new_v1, new_v2)
-            return TypedValue(result, int1, constant=False, name=None, lvalue_ptr=False)
+            return self.judge_zero(v2)
 
     def visitUnaryExpression_5(self, ctx:CCompilerParser.UnaryExpression_5Context) -> TypedValue:
         # 'sizeof' unaryExpression
@@ -2386,6 +2449,290 @@ class Visitor(CCompilerVisitor):
         # 'sizeof' '(' typeName ')'
         # TODO 不知道返回什么类型
         raise SemanticError('Not implemented yet.', ctx=ctx)
+
+    def visitCastExpression_1(self, ctx:CCompilerParser.CastExpression_1Context) -> TypedValue:
+        # '(' typeName ')' castExpression
+        # TODO 需要直到 type 在哪里获取
+        raise SemanticError('Not implemented yet.', ctx=ctx)
+
+    def visitCastExpression_2(self, ctx:CCompilerParser.CastExpression_2Context) -> TypedValue:
+        # unaryExpression
+        return self.visitChildren(ctx)
+
+    def visitMultiplicativeExpression_2(self, ctx:CCompilerParser.MultiplicativeExpression_2Context):
+        # multiplicativeExpression '*' castExpression
+        v1: TypedValue = self.visit(ctx.multiplicativeExpression())
+        v2: TypedValue = self.visit(ctx.castExpression())
+        rvalue1 = self.load_lvalue(v1)
+        rvalue2 = self.load_lvalue(v2)
+        new_rvalue1, new_rvalue2, new_type = self.bit_extend(rvalue1, rvalue2, ctx)
+        builder = self.builders[-1]
+        if new_type == double:
+            result = builder.fmul(rvalue1, rvalue2)
+        else:
+            result = builder.mul(rvalue1, rvalue2)
+        return TypedValue(result, new_type, constant=False, name=None, lvalue_ptr=False)
+
+    def visitMultiplicativeExpression_3(self, ctx:CCompilerParser.MultiplicativeExpression_3Context):
+        # multiplicativeExpression '/' castExpression
+        v1: TypedValue = self.visit(ctx.multiplicativeExpression())
+        v2: TypedValue = self.visit(ctx.castExpression())
+        rvalue1 = self.load_lvalue(v1)
+        rvalue2 = self.load_lvalue(v2)
+        new_rvalue1, new_rvalue2, new_type = self.bit_extend(rvalue1, rvalue2, ctx)
+        builder = self.builders[-1]
+        if new_type == double:
+            result = builder.fdiv(rvalue1, rvalue2)
+        else:
+            result = builder.sdiv(rvalue1, rvalue2)
+        return TypedValue(result, new_type, constant=False, name=None, lvalue_ptr=False)
+
+    def visitMultiplicativeExpression_4(self, ctx:CCompilerParser.MultiplicativeExpression_4Context):
+        # multiplicativeExpression '%' castExpression
+        v1: TypedValue = self.visit(ctx.multiplicativeExpression())
+        v2: TypedValue = self.visit(ctx.castExpression())
+        rvalue1 = self.load_lvalue(v1)
+        rvalue2 = self.load_lvalue(v2)
+        new_rvalue1, new_rvalue2, new_type = self.bit_extend(rvalue1, rvalue2, ctx)
+        builder = self.builders[-1]
+        if new_type == double:
+            result = builder.frem(rvalue1, rvalue2)
+        else:
+            result = builder.srem(rvalue1, rvalue2)
+        return TypedValue(result, new_type, constant=False, name=None, lvalue_ptr=False)
+
+    def visitAdditiveExpression_2(self, ctx:CCompilerParser.AdditiveExpression_2Context):
+        # additiveExpression '+' multiplicativeExpression
+        v1: TypedValue = self.visit(ctx.additiveExpression())
+        v2: TypedValue = self.visit(ctx.multiplicativeExpression())
+        rvalue1 = self.load_lvalue(v1)
+        rvalue2 = self.load_lvalue(v2)
+        new_rvalue1, new_rvalue2, new_type = self.bit_extend(rvalue1, rvalue2, ctx)
+        builder = self.builders[-1]
+        if new_type == double:
+            result = builder.fadd(rvalue1, rvalue2)
+        else:
+            result = builder.sadd_with_overflow(rvalue1, rvalue2)
+        return TypedValue(result, new_type, constant=False, name=None, lvalue_ptr=False)
+
+    def visitAdditiveExpression_3(self, ctx:CCompilerParser.AdditiveExpression_3Context):
+        # additiveExpression '-' multiplicativeExpression
+        v1: TypedValue = self.visit(ctx.additiveExpression())
+        v2: TypedValue = self.visit(ctx.multiplicativeExpression())
+        rvalue1 = self.load_lvalue(v1)
+        rvalue2 = self.load_lvalue(v2)
+        new_rvalue1, new_rvalue2, new_type = self.bit_extend(rvalue1, rvalue2, ctx)
+        builder = self.builders[-1]
+        if new_type == double:
+            result = builder.fsub(rvalue1, rvalue2)
+        else:
+            result = builder.ssub_with_overflow(rvalue1, rvalue2)
+        return TypedValue(result, new_type, constant=False, name=None, lvalue_ptr=False)
+
+    def visitShiftExpression_2(self, ctx:CCompilerParser.ShiftExpression_2Context):
+        # shiftExpression '<<' additiveExpression
+        v1: TypedValue = self.visit(ctx.shiftExpression())
+        v2: TypedValue = self.visit(ctx.additiveExpression())
+        rvalue1 = self.load_lvalue(v1)
+        rvalue2 = self.load_lvalue(v2)
+        new_rvalue1, new_rvalue2, new_type = self.bit_extend(rvalue1, rvalue2, ctx)
+        builder = self.builders[-1]
+        if new_type == double:
+            raise SemanticError('Bitwise shifting is only available to integer.')
+        else:
+            result = builder.shl(rvalue1, rvalue2)
+        return TypedValue(result, new_type, constant=False, name=None, lvalue_ptr=False)
+
+    def visitShiftExpression_3(self, ctx:CCompilerParser.ShiftExpression_3Context):
+        # shiftExpression '>>' additiveExpression
+        v1: TypedValue = self.visit(ctx.shiftExpression())
+        v2: TypedValue = self.visit(ctx.additiveExpression())
+        rvalue1 = self.load_lvalue(v1)
+        rvalue2 = self.load_lvalue(v2)
+        new_rvalue1, new_rvalue2, new_type = self.bit_extend(rvalue1, rvalue2, ctx)
+        builder = self.builders[-1]
+        if new_type == double:
+            raise SemanticError('Bitwise shifting is only available to integer.')
+        else:
+            result = builder.ashr(rvalue1, rvalue2)
+        return TypedValue(result, new_type, constant=False, name=None, lvalue_ptr=False)
+
+    def _relational_expression(self, op: str, ctx: ParserRuleContext):
+        v1: TypedValue = self.visit(ctx.getChild(0))
+        v2: TypedValue = self.visit(ctx.getChild(2))
+        rvalue1 = self.load_lvalue(v1)
+        rvalue2 = self.load_lvalue(v2)
+        new_rvalue1, new_rvalue2, new_type = self.bit_extend(rvalue1, rvalue2, ctx)
+        builder = self.builders[-1]
+        if new_type == double:
+            result = builder.fcmp_ordered(op, new_rvalue1, new_rvalue2)
+        else:
+            result = builder.sadd_with_overflow(rvalue1, rvalue2)
+            result = builder.icmp_signed(op, new_rvalue1, new_rvalue2)
+        return TypedValue(result, int1, constant=False, name=None, lvalue_ptr=False)
+
+    def visitRelationalExpression_2(self, ctx:CCompilerParser.RelationalExpression_2Context):
+        # relationalExpression '<' shiftExpression
+        return self._relational_expression('<', ctx)
+
+    def visitRelationalExpression_3(self, ctx:CCompilerParser.RelationalExpression_3Context):
+        # relationalExpression '>' shiftExpression
+        return self._relational_expression('>', ctx)
+
+    def visitRelationalExpression_4(self, ctx:CCompilerParser.RelationalExpression_4Context):
+        # relationalExpression '<=' shiftExpression
+        return self._relational_expression('<=', ctx)
+
+    def visitRelationalExpression_5(self, ctx:CCompilerParser.RelationalExpression_5Context):
+        # relationalExpression '>=' shiftExpression
+        return self._relational_expression('>=', ctx)
+
+    def visitEqualityExpression_2(self, ctx:CCompilerParser.EqualityExpression_2Context):
+        # equalityExpression '==' relationalExpression
+        return self._relational_expression('==', ctx)
+
+    def visitEqualityExpression_3(self, ctx:CCompilerParser.EqualityExpression_3Context):
+        # equalityExpression '!=' relationalExpression
+        return self._relational_expression('!=', ctx)
+
+    def visitAndExpression_2(self, ctx:CCompilerParser.AndExpression_2Context):
+        # andExpression '&' equalityExpression
+        v1: TypedValue = self.visit(ctx.andExpression())
+        v2: TypedValue = self.visit(ctx.equalityExpression())
+        rvalue1 = self.load_lvalue(v1)
+        rvalue2 = self.load_lvalue(v2)
+        new_rvalue1, new_rvalue2, new_type = self.bit_extend(rvalue1, rvalue2, ctx)
+        builder = self.builders[-1]
+        if new_type == double:
+            raise SemanticError('Bitwise operation is only available to integer.')
+        else:
+            result = builder.and_(rvalue1, rvalue2)
+        return TypedValue(result, new_type, constant=False, name=None, lvalue_ptr=False)
+
+    def visitExclusiveOrExpression_2(self, ctx:CCompilerParser.ExclusiveOrExpression_2Context):
+        # exclusiveOrExpression '^' andExpression
+        v1: TypedValue = self.visit(ctx.exclusiveOrExpression())
+        v2: TypedValue = self.visit(ctx.andExpression())
+        rvalue1 = self.load_lvalue(v1)
+        rvalue2 = self.load_lvalue(v2)
+        new_rvalue1, new_rvalue2, new_type = self.bit_extend(rvalue1, rvalue2, ctx)
+        builder = self.builders[-1]
+        if new_type == double:
+            raise SemanticError('Bitwise operation is only available to integer.')
+        else:
+            result = builder.xor(rvalue1, rvalue2)
+        return TypedValue(result, new_type, constant=False, name=None, lvalue_ptr=False)
+
+    def visitInclusiveOrExpression_2(self, ctx:CCompilerParser.InclusiveOrExpression_2Context):
+        # inclusiveOrExpression '|' exclusiveOrExpression
+        v1: TypedValue = self.visit(ctx.inclusiveOrExpression())
+        v2: TypedValue = self.visit(ctx.exclusiveOrExpression())
+        rvalue1 = self.load_lvalue(v1)
+        rvalue2 = self.load_lvalue(v2)
+        new_rvalue1, new_rvalue2, new_type = self.bit_extend(rvalue1, rvalue2, ctx)
+        builder = self.builders[-1]
+        if new_type == double:
+            raise SemanticError('Bitwise operation is only available to integer.')
+        else:
+            result = builder.or_(rvalue1, rvalue2)
+        return TypedValue(result, new_type, constant=False, name=None, lvalue_ptr=False)
+
+    def visitLogicalAndExpression_2(self, ctx:CCompilerParser.LogicalAndExpression_2Context):
+        # logicalAndExpression '&&' inclusiveOrExpression
+        v1: TypedValue = self.visit(ctx.logicalAndExpression())
+        v2: TypedValue = self.visit(ctx.inclusiveOrExpression())
+        b1 = self.judge_zero(v1)
+        b2 = self.judge_zero(v2)
+        builder = self.builders[-1]
+        result = builder.and_(b1.ir_value, b2.ir_value)
+        return TypedValue(result, int1, constant=False, name=None, lvalue_ptr=False)
+
+    def visitLogicalOrExpression_2(self, ctx:CCompilerParser.LogicalOrExpression_2Context):
+        # logicalOrExpression '||' logicalAndExpression
+        v1: TypedValue = self.visit(ctx.logicalOrExpression())
+        v2: TypedValue = self.visit(ctx.logicalAndExpression())
+        b1 = self.judge_zero(v1)
+        b2 = self.judge_zero(v2)
+        builder = self.builders[-1]
+        result = builder.or_(b1.ir_value, b2.ir_value)
+        return TypedValue(result, int1, constant=False, name=None, lvalue_ptr=False)
+
+    def visitConditionalExpression(self, ctx:CCompilerParser.ConditionalExpressionContext):
+        # logicalOrExpression ('?' expression ':' conditionalExpression)?
+        # TODO
+        return self.visitChildren(ctx)
+
+    def visitAssignmentExpression_2(self, ctx:CCompilerParser.AssignmentExpression_2Context):
+        # unaryExpression assignmentOperator assignmentExpression
+        v1: TypedValue = self.visit(ctx.unaryExpression())
+        op: str = ctx.assignmentOperator().getText()
+        v3: TypedValue = self.visit(ctx.assignmentExpression())
+        builder = self.builders[-1]
+        # lhs 必须为左值
+        if not v1.lvalue_ptr:
+            raise SemanticError('Assignment needs a lvalue at left.', ctx=ctx)
+        rvalue1 = self.load_lvalue(v1)
+        rvalue3 = self.load_lvalue(v3)
+        # '=' | '*=' | '/=' | '%=' | '+=' | '-=' | '<<=' | '>>=' | '&=' | '^=' | '|='
+        if op == '=':
+            result = self.convert_type(v3, v1.type, ctx=ctx)
+        elif op == '*=':
+            tmp = self.convert_type(v3, v1.type, ctx=ctx)
+            if v1.type != double:
+                result = builder.mul(rvalue1, tmp)
+            else:
+                result = builder.fmul(rvalue1, tmp)
+        elif op == '/=':
+            tmp = self.convert_type(v3, v1.type, ctx=ctx)
+            if v1.type != double:
+                result = builder.sdiv(rvalue1, tmp)
+            else:
+                result = builder.fdiv(rvalue1, tmp)
+        elif op == '%=':
+            tmp = self.convert_type(v3, v1.type, ctx=ctx)
+            if v1.type != double:
+                result = builder.srem(rvalue1, tmp)
+            else:
+                result = builder.frem(rvalue1, tmp)
+        elif op == '+=':
+            tmp = self.convert_type(v3, v1.type, ctx=ctx)
+            if v1.type != double:
+                result = builder.sadd_with_overflow(rvalue1, tmp)
+            else:
+                result = builder.fadd(rvalue1, tmp)
+        elif op == '-=':
+            tmp = self.convert_type(v3, v1.type, ctx=ctx)
+            if v1.type != double:
+                result = builder.ssub_with_overflow(rvalue1, tmp)
+            else:
+                result = builder.fsub(rvalue1, tmp)
+        elif op == '<<=':
+            tmp = self.convert_type(v3, v1.type, ctx=ctx)
+            if v1.type == double:
+                raise SemanticError('Floating point number cannot shift bits.')
+            result = builder.shl(rvalue1, tmp)
+        elif op == '>>=':
+            tmp = self.convert_type(v3, v1.type, ctx=ctx)
+            if v1.type == double:
+                raise SemanticError('Floating point number cannot shift bits.')
+            result = builder.ashr(rvalue1, tmp)
+        elif op == '&=':
+            tmp = self.convert_type(v3, v1.type, ctx=ctx)
+            if v1.type == double:
+                raise SemanticError('Floating point number cannot shift bits.')
+            result = builder.and_(rvalue1, tmp)
+        elif op == '^=':
+            tmp = self.convert_type(v3, v1.type, ctx=ctx)
+            if v1.type == double:
+                raise SemanticError('Floating point number cannot shift bits.')
+            result = builder.xor(rvalue1, tmp)
+        else:   # op == '|='
+            tmp = self.convert_type(v3, v1.type, ctx=ctx)
+            if v1.type == double:
+                raise SemanticError('Floating point number cannot shift bits.')
+            result = builder.or_(rvalue1, tmp)
+        self.store_lvalue(result, v1)
+        return
 
     def save(self, filename: str) -> None:
         """
@@ -2418,6 +2765,7 @@ def generate(input_filename: str, output_filename: str):
 
     tree = parser.prog()
     v = Visitor()
+    # v.builders.append(None)
     v.visit(tree)
     v.save(output_filename)
 
