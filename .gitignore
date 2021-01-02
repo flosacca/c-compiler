@@ -160,8 +160,8 @@ cython_debug/
 **/cparser/*Visitor.py
 
 # temporary test files
-*.c
-!**/test/*.c
+*.[ch]
+!**/test/*.[ch]
 
 # Makefile
 [Mm]akefile

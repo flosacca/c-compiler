@@ -178,7 +178,9 @@ class Visitor(CCompilerVisitor):
                 raise SemanticError(ctx=ctx, msg=result.message)
 
         # 处理函数体
-        self.visit(ctx.getChild(2))  # funcBody
+        self.visit(ctx.compoundStatement())  # funcBody
+        if not block.is_terminated:
+            ir_builder.ret_void()
 
         # 处理完毕，退出函数作用域
         self.current_function = ''
