@@ -2207,10 +2207,12 @@ class Visitor(CCompilerVisitor):
         # jumpStatement : 'return' expression? ';'
         ret_value_ctx = ctx.expression()
         ret_value = None
+        builder = self.builders[-1]
         if ret_value_ctx is not None:
             ret_value = self.visit(ret_value_ctx)
-        builder = self.builders[-1]
-        builder.ret(self.load_lvalue(ret_value))
+            builder.ret(self.load_lvalue(ret_value))
+        else:
+            builder.ret_void()
 
     def load_lvalue(self, lvalue_ptr: TypedValue) -> Union[ir.Value, ir.NamedValue]:
         """

@@ -40,7 +40,7 @@ elseStat
 endifStat
     : WS? '#endif' WS?;
 
-text: (WS | ID | OP)+;
+text: .*?;
 
 macroID: ID | OP;
 
