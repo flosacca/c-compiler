@@ -2,6 +2,8 @@ from antlr4 import *
 from llvmlite import ir
 
 import re
+import os
+import sys
 from typing import Dict, List, Union, Optional, Tuple, Any, Type
 
 from generator.ErrorListener import SemanticError
@@ -11,6 +13,8 @@ from cparser.CCompilerLexer import CCompilerLexer
 from cparser.CCompilerParser import CCompilerParser
 from cparser.CCompilerVisitor import CCompilerVisitor
 from generator.parser_util import Result
+
+from cpreprocess.preprocessor import preprocess
 
 double = ir.DoubleType()
 int1 = ir.IntType(1)
@@ -2930,7 +2934,9 @@ def generate(input_filename: str, output_filename: str):
     :return: 生成是否成功
     """
     # TODO: 加入宏处理
-    lexer = CCompilerLexer(FileStream(input_filename))
+    include_dirs = [os.getcwd(), './test']
+    precessed_text = preprocess(input_filename, include_dirs, None)
+    lexer = CCompilerLexer(InputStream(precessed_text))
     stream = CommonTokenStream(lexer)
     parser = CCompilerParser(stream)
     parser.removeErrorListeners()
