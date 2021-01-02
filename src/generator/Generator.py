@@ -2248,7 +2248,7 @@ class Visitor(CCompilerVisitor):
     def bit_extend(self, value1, value2, ctx=None) -> Tuple[Any, Any, ir.Type]:
         """
         将 value1 和 value2 拓展成相同的位数, 都为 ir.Value.
-        目前为方便起见，整数全拓展为最大的整数类型，若有浮点数，都拓展为 Double
+        目前为方便起见，若有浮点数，都拓展为 Double
 
         :param value1:
         :type value1:
@@ -2512,11 +2512,14 @@ class Visitor(CCompilerVisitor):
             return TypedValue(v2.ir_value, v2.type.as_pointer(), constant=False, name=None, lvalue_ptr=False)
         elif op == '*':
             pointer_type: ir.PointerType = v2.type
-            if not isinstance(pointer_type, ir.PointerType):
+            if not pointer_type.is_pointer:
                 raise SemanticError('Operator * needs a pointer.', ctx=ctx)
             if not v2.lvalue_ptr:
                 return TypedValue(v2.ir_value, pointer_type.pointee, constant=False, name=None, lvalue_ptr=True)
-            # todo
+            else:
+                # v2 是存放指针类型的左值时
+                ptr_value = self.load_lvalue(v2)
+                return TypedValue(ptr_value, pointer_type.pointee, constant=False, name=None, lvalue_ptr=True)
         elif op == '+':
             return self.visit(ctx.castExpression())
         elif op == '-':
