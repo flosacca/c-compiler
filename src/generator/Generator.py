@@ -2031,6 +2031,8 @@ class Visitor(CCompilerVisitor):
                                                                                lvalue_ptr=True))
                     if not result.success:
                         raise SemanticError("Symbol redefined: " + identifier, ctx)
+                    value = self.load_lvalue(initializer)
+                    ir_builder.store(value, variable)
 
     def visitInitDeclarator(self, ctx: CCompilerParser.InitDeclaratorContext):
         """
@@ -2509,8 +2511,12 @@ class Visitor(CCompilerVisitor):
                 raise SemanticError('Operator & needs a lvalue.', ctx=ctx)
             return TypedValue(v2.ir_value, v2.type.as_pointer(), constant=False, name=None, lvalue_ptr=False)
         elif op == '*':
-            v2.lvalue_ptr = True
-            return v2
+            pointer_type: ir.PointerType = v2.type
+            if not isinstance(pointer_type, ir.PointerType):
+                raise SemanticError('Operator * needs a pointer.', ctx=ctx)
+            if not v2.lvalue_ptr:
+                return TypedValue(v2.ir_value, pointer_type.pointee, constant=False, name=None, lvalue_ptr=True)
+            # todo
         elif op == '+':
             return self.visit(ctx.castExpression())
         elif op == '-':
@@ -2596,7 +2602,7 @@ class Visitor(CCompilerVisitor):
         if new_type == double:
             result = builder.fadd(rvalue1, rvalue2)
         else:
-            result = builder.sadd_with_overflow(rvalue1, rvalue2)
+            result = builder.add(rvalue1, rvalue2)
         return TypedValue(result, new_type, constant=False, name=None, lvalue_ptr=False)
 
     def visitAdditiveExpression_3(self, ctx:CCompilerParser.AdditiveExpression_3Context):
@@ -2651,7 +2657,7 @@ class Visitor(CCompilerVisitor):
         if new_type == double:
             result = builder.fcmp_ordered(op, new_rvalue1, new_rvalue2)
         else:
-            result = builder.sadd_with_overflow(rvalue1, rvalue2)
+            result = builder.add(rvalue1, rvalue2)
             result = builder.icmp_signed(op, new_rvalue1, new_rvalue2)
         return TypedValue(result, int1, constant=False, name=None, lvalue_ptr=False)
 
@@ -2781,7 +2787,7 @@ class Visitor(CCompilerVisitor):
         elif op == '+=':
             tmp = self.convert_type(v3, v1.type, ctx=ctx)
             if v1.type != double:
-                result = builder.sadd_with_overflow(rvalue1, tmp)
+                result = builder.add(rvalue1, tmp)
             else:
                 result = builder.fadd(rvalue1, tmp)
         elif op == '-=':
