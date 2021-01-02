@@ -1,9 +1,5 @@
 grammar CCompiler;
 
-@parser::header {
-from .RuleContextWithAltNum import *
-}
-
 // Old syntax {{{
 // prog :(include)* (initialBlock | arrayInitBlock | structInitBlock | mStructDef | mFunctionDefinition | mFunctionDeclaration )*;
 // // prog : (forBlock)*;

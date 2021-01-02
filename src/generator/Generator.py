@@ -310,13 +310,13 @@ class Visitor(CCompilerVisitor):
                 |   typeQualifier
                 ;
         """
-        altNum = ctx.getAltNumber()
-        if altNum == 1:
+        if ctx.storageClassSpecifier():
             return "storage", ctx.getText()
-        if altNum == 2:
+        if ctx.typeSpecifier():
             return "type", self.visit(ctx.typeSpecifier())
-        if altNum == 3:
+        if ctx.typeQualifier():
             return "type_qualifier", self.visit(ctx.typeQualifier())
+        raise SemanticError('impossible')
 
     def visitDeclarator(self, ctx:CCompilerParser.DeclaratorContext):
         """
@@ -735,8 +735,7 @@ class Visitor(CCompilerVisitor):
         """
         处理字符串字面值
         """
-        # todo 处理更多的转义字符
-        return ctx.getText()[1:-1].replace(r"\n", "\n").replace(r"\r", "\r")
+        return ctx.getText()[1:-1].encode('utf-8').decode('unicode_escape')
 
     def visitConstant(self, ctx: CCompilerParser.ConstantContext) -> TypedValue:
         # This rule has only lexical elements. In this case, getAltNumber()
@@ -758,26 +757,23 @@ class Visitor(CCompilerVisitor):
         """
         Primary Expression
         """
-        altNum = ctx.getAltNumber()
-        if altNum == 1:  # Indentifer
+        if ctx.Identifier():
             identifier = ctx.getText()
             item = self.symbol_table.get_item(identifier)
             if item is None:
                 raise SemanticError("Undefined identifier: " + identifier)
             return item
-        elif altNum == 2:  # String literals
+        if ctx.stringLiteral():
             count = ctx.getChildCount()
             str_result = ""
             for i in range(count):
                 str_result += self.visit(ctx.getChild(i))
             return self.str_constant(str_result)
-        elif altNum == 3:  # Constant
-            # primaryExpression: constant
-            return self.visitChildren(ctx)
-        elif altNum == 4:  # (expression)
-            # primaryExpression : '(' expression ')'
-            return self.visit(ctx.getChild(1))
-        return self.visitChildren(ctx)
+        if ctx.constant():
+            return self.visit(ctx.constant())
+        if ctx.expression():
+            return self.visit(ctx.expression())
+        raise SemanticError('impossible')
 
     def visitPrimitiveType(self, ctx: CCompilerParser.PrimitiveTypeContext) -> ir.Type:
         """
