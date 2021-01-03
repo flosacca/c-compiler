@@ -100,7 +100,7 @@ class IfStack:
 
 
 class Listener(CPreprocessorListener):
-    def __init__(self, filepath: str, include_dirs: List[str], macro_define_list: Optional[Dict[str, str]] = None):
+    def __init__(self, filepath: str, include_dirs: List[str], macro_define_list: Optional[Dict[str, Optional[str]]] = None):
         if macro_define_list is None:
             macro_define_list = dict()
         # 存放预处理后的代码
@@ -193,7 +193,7 @@ class Listener(CPreprocessorListener):
         return self._macro_define_list
 
 
-def preprocess(filepath: str, include_dirs: List[str], macro_define_list: Optional[Dict[str, str]] = None) -> str:
+def preprocess(filepath: str, include_dirs: List[str], macro_define_list: Optional[Dict[str, Optional[str]]] = None) -> str:
     """
     预处理 .c 文件.
 
@@ -229,7 +229,7 @@ def preprocess(filepath: str, include_dirs: List[str], macro_define_list: Option
     return output_data
 
 
-def macro_replace(text: str, macro_list: Dict[str, str]) -> str:
+def macro_replace(text: str, macro_list: Dict[str, Optional[str]]) -> str:
     """
     替换宏.
 
@@ -259,4 +259,4 @@ def remove_redundant_carriage(text: str) -> str:
 
 
 if __name__ == '__main__':
-    print(preprocess(sys.argv[1], ['H:\\github\\c-compiler\\src\\test']))
+    print(preprocess(sys.argv[1], ['H:\\github\\c-compiler\\src\\test', 'H:\\github\\c-compiler\\src\\test\libc\include']))

@@ -163,7 +163,7 @@ cython_debug/
 
 # temporary test files
 *.[ch]
-!**/test/*.[ch]
+!**/test/**/*.[ch]
 
 # Makefile
 [Mm]akefile

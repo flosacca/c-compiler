@@ -288,6 +288,7 @@ primitiveType
     | 'char'
     | 'short'
     | 'int'
+    | 'long' 'long'
     | 'long'
     | 'float'
     | 'double'

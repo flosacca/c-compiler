@@ -19,11 +19,13 @@ from cpreprocess.preprocessor import preprocess
 
 double = ir.DoubleType()
 int1 = ir.IntType(1)
+int16 = ir.IntType(16)
 int32 = ir.IntType(32)
+int64 = ir.IntType(64)
 int8 = ir.IntType(8)
 void = ir.VoidType()
 
-int_types = [int1, int8, int32]
+int_types = [int1, int8, int16, int32, int64]
 
 int32_zero = ir.Constant(int32, 0)
 
@@ -61,8 +63,10 @@ class Visitor(CCompilerVisitor):
 
         # 符号表
         self.symbol_table: SymbolTable = SymbolTable()
+        self.symbol_table.add_item("short", int16)
         self.symbol_table.add_item("int", int32)
         self.symbol_table.add_item("long", int32)
+        self.symbol_table.add_item("longlong", int64)
         self.symbol_table.add_item("double", double)
         self.symbol_table.add_item("char", int8)
         self.symbol_table.add_item("void", void)
@@ -1487,6 +1491,11 @@ def generate(input_filename: str, output_filename: str):
 
     include_dirs = [os.getcwd(), './test']
     precessed_text = preprocess(input_filename, include_dirs, None)
+
+    # 加入宏处理
+    include_dirs = [os.getcwd(), './test', './test/libc/include']
+    macros = {'_WIN64': None}
+    precessed_text = preprocess(input_filename, include_dirs, macros)
     lexer = CCompilerLexer(InputStream(precessed_text))
     stream = CommonTokenStream(lexer)
     parser = CCompilerParser(stream)

@@ -1,17 +1,21 @@
 #include <stdio.h>
 #include "helloworld.h"
 
+struct {
+    int a[100], b;
+} s;
+
 int main() {
-    printHello();
-    for (int i = 0; i < 10; i++) {
-        printf("%d\n", i);
-        for (int i = 0; i < 2; ++i) {
-            printf("lala: %d\n", Suck);
-        }
-    }
+//    printHello();
+    int a = 1;
+    long long z = a;
+    char b = 2;
+    a -= b;
+    int** c;
+    int d = c[1][3];
     return 0;
 }
 
-void printHello() {
-    printf("Hello World!\n");
-}
+//void printHello() {
+//    printf("Hello World!\n");
+//}
