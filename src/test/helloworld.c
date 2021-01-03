@@ -1,4 +1,4 @@
-//#include <stdio.h>
+#include <stdio.h>
 #include "helloworld.h"
 
 //int hello(void* a);

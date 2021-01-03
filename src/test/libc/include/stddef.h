@@ -3,7 +3,8 @@
 
 #include <corecrt.h>
 
-// ignore __cdecl now
-#define __cdecl
+// ignore unsigned
+#define unsigned
+
 
 #endif

@@ -5,6 +5,9 @@
 #define FASTCALL __fastcall
 #define WINAPI __stdcall
 
+// for now, ignore unsigned
+#define unsigned
+
 typedef unsigned long       DWORD;
 typedef int                 BOOL;
 typedef unsigned char       BYTE;
@@ -23,7 +26,6 @@ typedef long                *LPLONG;
 typedef DWORD               *PDWORD;
 typedef DWORD               *LPDWORD;
 typedef void                *LPVOID;
-typedef CONST void          *LPCVOID;
 
 typedef int                 INT;
 typedef unsigned int        UINT;
