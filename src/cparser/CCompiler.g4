@@ -105,13 +105,13 @@ inclusiveOrExpression
     ;
 
 logicalAndExpression
-    : inclusiveOrExpression                           # logicalAndExpression_1
-    | logicalAndExpression '&&' inclusiveOrExpression # logicalAndExpression_2
+    : inclusiveOrExpression
+    | logicalAndExpression '&&' inclusiveOrExpression
     ;
 
 logicalOrExpression
-    : logicalAndExpression                            # logicalOrExpression_1
-    | logicalOrExpression '||' logicalAndExpression   # logicalOrExpression_2
+    : logicalAndExpression
+    | logicalOrExpression '||' logicalAndExpression
     ;
 
 conditionalExpression
