@@ -1,12 +1,15 @@
 #include <stdio.h>
 
+#define N 100005
+
+char s[N], t[N];
+int f[N];
+
 int main() {
-    char s[1000], t[1000];
     printf("Input text: ");
     scanf("%s", s);
     printf("Input pattern: ");
     scanf("%s", t);
-    int f[1000];
     f[0] = -1;
     int i = 0, j = -1;
     while (t[i]) {
