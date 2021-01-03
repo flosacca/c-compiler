@@ -7,6 +7,12 @@
 #define STDOUT_FILENO	1
 #define STDERR_FILENO	2
 
+#define EOF	            (-1)
+
+#define SEEK_SET	     0
+#define SEEK_CUR	     1
+#define SEEK_END	     2
+
 typedef struct _iobuf
 {
   char	*_ptr;
@@ -21,36 +27,36 @@ typedef struct _iobuf
 
 FILE _iob[];	/* An array of FILE imported from DLL. */
 
-__cdecl FILE * fopen (const char *, const char *);
-__cdecl FILE * freopen (const char *, const char *, FILE *);
-__cdecl int    fflush (FILE *);
-__cdecl int    fclose (FILE *);
-__cdecl int    remove (const char *);
-__cdecl int    rename (const char *, const char *);
+__cdecl FILE * fopen (const char * _1, const char * _2);
+__cdecl FILE * freopen (const char * _1, const char * _2, FILE * _3);
+__cdecl int    fflush (FILE *_1);
+__cdecl int    fclose (FILE *_1);
+__cdecl int    remove (const char *_1);
+__cdecl int    rename (const char *_1, const char * _2);
 __cdecl FILE * tmpfile ();
-__cdecl char * tmpnam (char *);
+__cdecl char * tmpnam (char *_1);
 
-__cdecl int    fprintf (FILE *, const char *, ...);
-__cdecl int    printf (const char *, ...);
-__cdecl int    sprintf (char *, const char *, ...);
-__cdecl int    fscanf (FILE *, const char *, ...);
-__cdecl int    scanf (const char *, ...);
-__cdecl int    sscanf (const char *, const char *, ...);
+__cdecl int    fprintf (FILE *_1, const char *_2, ...);
+__cdecl int    printf (const char *_1, ...);
+__cdecl int    sprintf (char *_1, const char *_2, ...);
+__cdecl int    fscanf (FILE *_1, const char *_2, ...);
+__cdecl int    scanf (const char *_1, ...);
+__cdecl int    sscanf (const char *_1, const char *_2, ...);
 
-__cdecl int    fgetc (FILE *);
-__cdecl char * fgets (char *, int, FILE *);
-__cdecl int    fputc (int, FILE *);
-__cdecl int    fputs (const char *, FILE *);
-__cdecl char * gets (char *);
-__cdecl int    puts (const char *);
-__cdecl int    ungetc (int, FILE *);
+__cdecl int    fgetc (FILE *_1);
+__cdecl char * fgets (char *_1, int _2, FILE *_3);
+__cdecl int    fputc (int _1, FILE *_2);
+__cdecl int    fputs (const char *_1, FILE *_2);
+__cdecl char * gets (char *_1);
+__cdecl int    puts (const char *_1);
+__cdecl int    ungetc (int_1, FILE *_2);
 __cdecl int    getchar();
-__cdecl int    putchar(int);
+__cdecl int    putchar(int _1);
 
-__cdecl size_t fread (void *, size_t, size_t, FILE *);
-__cdecl size_t fwrite (const void *, size_t, size_t, FILE *);
-__cdecl int    fseek (FILE *, long, int);
-__cdecl long   ftell (FILE *);
-__cdecl void   rewind (FILE *);
+__cdecl size_t fread (void* _1, size_t _2, size_t _3, FILE *_4);
+__cdecl size_t fwrite (const void* _1, size_t _2, size_t _3, FILE *_4);
+__cdecl int    fseek (FILE *_1, long _2, int _3);
+__cdecl long   ftell (FILE *_1);
+__cdecl void   rewind (FILE *_1);
 
 #endif

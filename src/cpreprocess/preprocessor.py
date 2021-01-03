@@ -259,4 +259,6 @@ def remove_redundant_carriage(text: str) -> str:
 
 
 if __name__ == '__main__':
-    print(preprocess(sys.argv[1], ['H:\\github\\c-compiler\\src\\test', 'H:\\github\\c-compiler\\src\\test\libc\include']))
+    print(preprocess(sys.argv[1], ['H:\\github\\c-compiler\\src\\test',
+                                   'H:\\github\\c-compiler\\src\\test\libc\include',
+                                   'H:\\github\\c-compiler\\src\\test\windows\include']))

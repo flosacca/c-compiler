@@ -1493,7 +1493,7 @@ def generate(input_filename: str, output_filename: str):
     precessed_text = preprocess(input_filename, include_dirs, None)
 
     # 加入宏处理
-    include_dirs = [os.getcwd(), './test', './test/libc/include']
+    include_dirs = [os.getcwd(), './test', './test/libc/include', './test/windows/include']
     macros = {'_WIN64': None}
     precessed_text = preprocess(input_filename, include_dirs, macros)
     lexer = CCompilerLexer(InputStream(precessed_text))

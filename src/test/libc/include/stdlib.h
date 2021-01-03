@@ -1,24 +1,24 @@
 #ifndef _STDLIB_H_
 #define _STDLIB_H_
 
-__cdecl int atoi (const char *);
-__cdecl long atol (const char *);
+__cdecl int atoi (const char *_1);
+__cdecl long atol (const char *_1);
 
-__cdecl double strtod (const char *, char **);
-__cdecl double atof (const char *);
+__cdecl double strtod (const char *_1, char ** _2);
+__cdecl double atof (const char *_1);
 
 __cdecl int rand ();
-__cdecl void srand (int);
+__cdecl void srand (int _1);
 
 __cdecl void abort ();
-__cdecl void exit (int);
+__cdecl void exit (int _1);
 
-__cdecl int system (const char *);
-__cdecl char *getenv (const char *);
+__cdecl int system (const char *_1);
+__cdecl char *getenv (const char *_1);
 
-__cdecl void *calloc (size_t, size_t);
-__cdecl void *malloc (size_t);
-__cdecl void *realloc (void *, size_t);
-__cdecl void free (void *);
+__cdecl void *calloc (size_t _1, size_t _2);
+__cdecl void *malloc (size_t _1);
+__cdecl void *realloc (void *_1, size_t _2);
+__cdecl void free (void *_1);
 
 #endif

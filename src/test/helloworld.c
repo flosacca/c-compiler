@@ -1,9 +1,11 @@
-#include <stdio.h>
+//#include <stdio.h>
 #include "helloworld.h"
 
-struct {
+//int hello(void* a);
+
+struct s {
     int a[100], b;
-} s;
+};
 
 int main() {
 //    printHello();
@@ -13,6 +15,7 @@ int main() {
     a -= b;
     int** c;
     int d = c[1][3];
+    struct s suck;
     return 0;
 }
 
