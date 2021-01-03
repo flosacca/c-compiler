@@ -45,8 +45,8 @@ class Visitor(CCompilerVisitor):
         self.builder: ir.IRBuilder
 
         # 用于控制语句的标号
-        self.start_blocks: ir.BasicBlock = []
-        self.end_blocks: ir.BasicBlock = []
+        self.continue_blocks: ir.BasicBlock = []
+        self.break_blocks: ir.BasicBlock = []
 
         # 函数列表 Dict[名称, 是否有定义]
         self.functions: Dict[str, ir.Function] = dict()
@@ -308,7 +308,7 @@ class Visitor(CCompilerVisitor):
             return pointer_declarator
         return declarator_func
 
-    def visitDeclaration(self, ctx: CCompilerParser.DeclarationContext) -> None:
+    def visitForDeclaration(self, ctx: CCompilerParser.DeclarationContext) -> None:
         """
         声明.
 
@@ -515,10 +515,20 @@ class Visitor(CCompilerVisitor):
             base_type = base_type.as_pointer()
         return base_type
 
+    def visitCompoundStatement(self, ctx: CCompilerParser.CompoundStatementContext) -> None:
+        self.symbol_table.enter_scope()
+        self.visitChildren(ctx)
+        self.symbol_table.quit_scope()
+
     def visitSelectionStatement(self, ctx: CCompilerParser.SelectionStatementContext) -> None:
+        """
+        selectionStatement
+            : 'if' '(' expression ')' statement ('else' statement)?
+            | 'switch' '(' expression ')' statement
+            ;
+        """
         kw = ctx.getChild(0).getText()
         if kw == 'if':
-            # 'if' '(' expression ')' statement ('else' statement)?
             has_else = len(ctx.statement()) > 1
             builder = self.builder
             true_block = builder.append_basic_block()
@@ -537,45 +547,78 @@ class Visitor(CCompilerVisitor):
                 if not self.builder.basic_block.is_terminated:
                     self.builder.branch(end_block)
             self.builder = ir.IRBuilder(end_block)
-        else:
+            return
+        if kw == 'switch':
             raise SemanticError("Not implemented", ctx)
+        raise SemanticError('impossible')
 
     def visitIterationStatement(self, ctx: CCompilerParser.SelectionStatementContext) -> None:
+        """
+        iterationStatement
+            : 'while' '(' expression ')' statement
+            | 'do' statement 'while' '(' expression ')' ';'
+            | 'for' '(' forCondition ')' statement
+            ;
+        """
         kw = ctx.getChild(0).getText()
-        if kw == 'while' or kw == 'do':
-            loop_block = self.builder.append_basic_block()
-            start_block = self.builder.append_basic_block()
-            end_block = self.builder.append_basic_block()
-            self.start_blocks.append(start_block)
-            self.end_blocks.append(end_block)
-            if kw == 'while':
-                self.builder.branch(start_block)
-            elif kw == 'do':
-                self.builder.branch(loop_block)
-            self.builder = ir.IRBuilder(start_block)
+        if ctx.first:
+            self.symbol_table.enter_scope()
+            self.visit(ctx.first)
+        block_cond = self.builder.append_basic_block()
+        block_body = self.builder.append_basic_block()
+        block_end = self.builder.append_basic_block()
+        # Terminate last block
+        if kw == 'do':
+            self.builder.branch(block_body)
+        else:
+            self.builder.branch(block_cond)
+        # Build blocks
+        self.builder = ir.IRBuilder(block_cond)
+        if kw == 'for':
+            if ctx.second:
+                cond = self.visit(ctx.second)
+            else:
+                cond = int1(1)
+        else:
             cond = self.visit(ctx.expression())
-            self.builder.cbranch(self.to_boolean(cond).ir_value, loop_block, end_block)
-            self.builder = ir.IRBuilder(loop_block)
-            self.visit(ctx.statement())
-            if not self.builder.basic_block.is_terminated:
-                self.builder.branch(start_block)
-            self.builder = ir.IRBuilder(end_block)
-            self.start_blocks.pop()
-            self.end_blocks.pop()
-            return
-        raise SemanticError("Not implemented", ctx)
+        self.builder.cbranch(self.to_boolean(cond).ir_value, block_body, block_end)
+        if ctx.third:
+            block_update = self.builder.append_basic_block()
+            self.builder = ir.IRBuilder(block_update)
+            self.visit(ctx.third)
+            self.builder.branch(block_cond)
+            self.continue_blocks.append(block_update)
+        else:
+            self.continue_blocks.append(block_cond)
+        self.break_blocks.append(block_end)
+        self.builder = ir.IRBuilder(block_body)
+        self.visit(ctx.statement())
+        if not self.builder.basic_block.is_terminated:
+            self.builder.branch(self.continue_blocks[-1])
+        self.continue_blocks.pop()
+        self.break_blocks.pop()
+        if ctx.first:
+            self.symbol_table.quit_scope()
+        self.builder = ir.IRBuilder(block_end)
 
     def visitJumpStatement(self, ctx: CCompilerParser.JumpStatementContext) -> None:
+        """
+        jumpStatement
+            : 'continue' ';'
+            | 'break' ';'
+            | 'return' expression? ';'
+            ;
+        """
         kw = ctx.getChild(0).getText()
         if kw == 'continue':
-            if not self.start_blocks:
+            if not self.continue_blocks:
                 raise SemanticError('Nothing to continue', ctx)
-            self.builder.branch(self.start_blocks[-1])
+            self.builder.branch(self.continue_blocks[-1])
             return
         if kw == 'break':
-            if not self.end_blocks:
+            if not self.break_blocks:
                 raise SemanticError('Nothing to break', ctx)
-            self.builder.branch(self.end_blocks[-1])
+            self.builder.branch(self.break_blocks[-1])
             return
         if kw == 'return':
             ret_value_ctx = ctx.expression()

@@ -159,23 +159,10 @@ selectionStatement
 iterationStatement
     : 'while' '(' expression ')' statement
     | 'do' statement 'while' '(' expression ')' ';'
-    | 'for' '(' forCondition ')' statement
+    | 'for' '(' first=forInitialization ';' second=expression? ';' third=expression? ')' statement
     ;
 
-forCondition
-	:   forDeclaration ';' forExpression? ';' forExpression?
-	|   expression? ';' forExpression? ';' forExpression?
-	;
-
-forDeclaration
-    :   declarationSpecifiers initDeclaratorList
-	| 	declarationSpecifiers
-    ;
-
-forExpression
-    :   assignmentExpression
-    |   forExpression ',' assignmentExpression
-    ;
+forInitialization : expression? | forDeclaration ;
 
 jumpStatement
     : 'continue' ';'
@@ -202,9 +189,12 @@ functionDefinition
     : typeSpecifier declarator compoundStatement
     ;
 
-declaration
-    : declarationSpecifiers initDeclaratorList ';'
-	| 	declarationSpecifiers ';'
+declaration : forDeclaration ';' ;
+
+// It may be empty. Is it right?
+forDeclaration
+    : declarationSpecifiers initDeclaratorList
+    | declarationSpecifiers
     ;
 
 initDeclaratorList
