@@ -106,7 +106,11 @@ class Visitor(CCompilerVisitor):
                 raise SemanticError(ctx=ctx, msg='函数重定义: ' + function_name)
         else:
             llvm_function = ir.Function(self.module, function_type, name=function_name)
-            result = self.symbol_table.add_item(function_name, llvm_function)
+            result = self.symbol_table.add_item(function_name, TypedValue(ir_value=llvm_function,
+                                                                          typ=llvm_function.type,
+                                                                          constant=False,
+                                                                          name=function_name,
+                                                                          lvalue_ptr=False))
             if not result.success:
                 raise SemanticError('函数重定义: ' + function_name, ctx)
 
@@ -177,8 +181,8 @@ class Visitor(CCompilerVisitor):
         declarator_func = self.visit(ctx.directDeclarator())
 
         def create_arr_ret(typ: ir.Type):
-            id1, typ1, _ = declarator_func(typ)
-            return id1, ir.ArrayType(typ1, arr_len), None
+            id1, typ1, pl = declarator_func(typ)
+            return id1, ir.ArrayType(typ1, arr_len), pl
 
         return create_arr_ret
 
@@ -190,8 +194,9 @@ class Visitor(CCompilerVisitor):
         parameter_list = self.visit(ctx.parameterTypeList())
 
         def create_func_ret(typ: ir.Type):
-            identifier1, typ1, _ = declarator_func(typ)
-            return identifier1, ir.FunctionType(typ1, parameter_list.arg_list, parameter_list.var_arg), parameter_list
+            typ1 = ir.FunctionType(typ, parameter_list.arg_list, parameter_list.var_arg)
+            identifier2, typ2, _ = declarator_func(typ1)
+            return identifier2, typ2, parameter_list
         return create_func_ret
 
     def visitParameterTypeList(self, ctx: CCompilerParser.ParameterTypeListContext) -> ParameterList:
@@ -279,7 +284,7 @@ class Visitor(CCompilerVisitor):
             return "type_qualifier", self.visit(ctx.typeQualifier())
         raise SemanticError('impossible')
 
-    def visitDeclarator(self, ctx:CCompilerParser.DeclaratorContext):
+    def visitDeclarator(self, ctx: CCompilerParser.DeclaratorContext):
         """
         描述符.
 
@@ -348,7 +353,11 @@ class Visitor(CCompilerVisitor):
                     if isinstance(typ, ir.FunctionType):
                         variable = ir.Function(self.module, typ, identifier)
                         self.functions[identifier] = variable
-                        result = self.symbol_table.add_item(identifier, variable)
+                        self.symbol_table.add_item(identifier, TypedValue(ir_value=variable,
+                                                                          typ=variable.type,
+                                                                          constant=False,
+                                                                          name=identifier,
+                                                                          lvalue_ptr=False))
                     else:
                         variable = ir.GlobalVariable(self.module, typ, identifier)
                         self.symbol_table.add_item(identifier, TypedValue(ir_value=variable,
@@ -583,7 +592,7 @@ class Visitor(CCompilerVisitor):
             else:
                 cond = const_value(ir.Constant(int1, 1))
         else:
-            cond = self.visit(ctx.expression())
+            cond = self.visit(ctx.expression(0))
         cond = self.to_boolean(cond)
         self.builder.cbranch(cond.ir_value, block_body, block_end)
         if ctx.third:
@@ -944,18 +953,21 @@ class Visitor(CCompilerVisitor):
     def visitPostfixExpression_3(self, ctx: CCompilerParser.PostfixExpression_3Context) -> TypedValue:
         # postfixExpression '(' argumentExpressionList? ')'
         # 函数调用
-        func = self.visit(ctx.postfixExpression())
-        if func is None or not isinstance(func, ir.Function):
+        func_value: TypedValue = self.visit(ctx.postfixExpression())
+        if func_value is None:
             raise SemanticError('Function not declared')
-        func: ir.Function
+        func_pointer = self.load_lvalue(func_value)
+        if not func_pointer.type.is_pointer:
+            raise SemanticError('Invalid function.')
+        func_type: ir.FunctionType = func_pointer.type.pointee
         builder = self.builder
         if ctx.argumentExpressionList():
             argument_expressions = self.visit(ctx.argumentExpressionList())
         else:
             argument_expressions = []
         func_args = []
-        func_arg_count = len(func.args)
-        if func.function_type.var_arg:
+        func_arg_count = len(func_type.args)
+        if func_type.var_arg:
             if len(argument_expressions) < func_arg_count:
                 raise SemanticError("Too few arguments")
         else:
@@ -963,7 +975,7 @@ class Visitor(CCompilerVisitor):
                 raise SemanticError("Incorrect number of arguments")
         for i in range(len(argument_expressions)):
             if i < func_arg_count:
-                func_args.append(self.convert_type(argument_expressions[i], func.args[i].type, ctx))
+                func_args.append(self.convert_type(argument_expressions[i], func_type.args[i], ctx))
             else:
                 if isinstance(argument_expressions[i].type, ir.ArrayType):
                     func_args.append(self.convert_type(argument_expressions[i],
@@ -971,7 +983,7 @@ class Visitor(CCompilerVisitor):
                                                        ctx))
                 else:
                     func_args.append(self.load_lvalue(argument_expressions[i]))
-        ret_value = builder.call(func, func_args)
+        ret_value = builder.call(func_pointer, func_args)
         return TypedValue(ir_value=ret_value, typ=ret_value.type, constant=False, name=None, lvalue_ptr=False)
 
     def visitPostfixExpression_4(self, ctx: CCompilerParser.PostfixExpression_4Context) -> TypedValue:
@@ -1429,6 +1441,12 @@ def generate(input_filename: str, output_filename: str):
     :return: 生成是否成功
     """
     # TODO: 加入宏处理
+    def as_pointer(self: ir.Type, addrspace=0):
+        if isinstance(self, ir.VoidType):
+            return int8.as_pointer(addrspace)
+        return ir.PointerType(self, addrspace)
+    ir.Type.as_pointer = as_pointer
+
     include_dirs = [os.getcwd(), './test']
     precessed_text = preprocess(input_filename, include_dirs, None)
     lexer = CCompilerLexer(InputStream(precessed_text))

@@ -1,6 +1,5 @@
 #include <stdio.h>
 #include <string.h>
-#define a
 
 int main()
 {
