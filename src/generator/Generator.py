@@ -41,11 +41,8 @@ class Visitor(CCompilerVisitor):
         # llvm.create_mcjit_compiler(backing_mod, target_machine)
         self.module.data_layout = 'e-m:e-i64:64-f80:128-n8:16:32:64-S128'
 
-        # 语句块
-        self.blocks: List[ir.Block] = []
-
         # 待生成的 llvm 语句块
-        self.builders: List[ir.IRBuilder] = []
+        self.builder: ir.IRBuilder
 
         # 函数列表 Dict[名称, 是否有定义]
         self.functions: Dict[str, ir.Function] = dict()
@@ -56,12 +53,6 @@ class Visitor(CCompilerVisitor):
         # 当前所在函数名
         self.current_function: str = ''
         self.constants = 0
-
-        # 这个变量是否需要加载
-        self.whether_need_load: bool = True
-
-        # endif块
-        self.endif_block = None
 
         # 符号表
         self.symbol_table: SymbolTable = SymbolTable()
@@ -120,12 +111,10 @@ class Visitor(CCompilerVisitor):
             llvm_function.args[i].name = name
 
         # 函数 block
-        block: ir.Block = llvm_function.append_basic_block(name=function_name + '.entry')
+        block: ir.Block = llvm_function.append_basic_block(name=f'{function_name}.entry')
         self.functions[function_name] = llvm_function
 
-        ir_builder: ir.IRBuilder = ir.IRBuilder(block)
-        self.blocks.append(block)
-        self.builders.append(ir_builder)
+        self.builder = ir.IRBuilder(block)
 
         # 进入函数作用域
         self.current_function = function_name
@@ -146,13 +135,13 @@ class Visitor(CCompilerVisitor):
 
         # 处理函数体
         self.visit(ctx.compoundStatement())  # funcBody
-        if not block.is_terminated:
-            ir_builder.ret_void()
+        # self.builder may change
+        if not self.builder.basic_block.is_terminated:
+            self.builder.ret_void()
 
         # 处理完毕，退出函数作用域
         self.current_function = ''
-        self.blocks.pop()
-        self.builders.pop()
+        self.builder = None
         self.symbol_table.quit_scope()
         return
 
@@ -364,7 +353,7 @@ class Visitor(CCompilerVisitor):
                                                                           name=identifier,
                                                                           lvalue_ptr=True))
                 else:
-                    ir_builder = self.builders[-1]
+                    ir_builder = self.builder
                     variable = ir_builder.alloca(typ, 1, identifier)
                     result = self.symbol_table.add_item(identifier, TypedValue(ir_value=variable,
                                                                                typ=typ,
@@ -522,26 +511,44 @@ class Visitor(CCompilerVisitor):
             base_type = base_type.as_pointer()
         return base_type
 
-    def visitJumpStatement_1(self, ctx: CCompilerParser.JumpStatement_1Context) -> None:
-        # jumpStatement : 'continue' ';'
-        raise SemanticError("Not implemented", ctx)
-        pass
-
-    def visitJumpStatement_2(self, ctx: CCompilerParser.JumpStatement_2Context) -> None:
-        # jumpStatement : 'break' ';'
-        raise SemanticError("Not implemented", ctx)
-        pass
-
-    def visitJumpStatement_3(self, ctx: CCompilerParser.JumpStatement_3Context) -> None:
-        # jumpStatement : 'return' expression? ';'
-        ret_value_ctx = ctx.expression()
-        ret_value = None
-        builder = self.builders[-1]
-        if ret_value_ctx is not None:
-            ret_value = self.visit(ret_value_ctx)
-            builder.ret(self.load_lvalue(ret_value))
+    def visitSelectionStatement(self, ctx: CCompilerParser.SelectionStatementContext) -> None:
+        kw = ctx.getChild(0).getText()
+        if kw == 'if':
+            # 'if' '(' expression ')' statement ('else' statement)?
+            has_else = len(ctx.statement()) > 1
+            builder = self.builder
+            true_block = builder.append_basic_block()
+            false_block = builder.append_basic_block()
+            blocks = [true_block]
+            if has_else:
+                blocks.append(false_block)
+                end_block = builder.append_basic_block()
+            else:
+                end_block = false_block
+            cond = self.visit(ctx.expression())
+            builder.cbranch(self.convert_type(cond, int1, ctx=ctx), true_block, false_block)
+            for i, block in enumerate(blocks):
+                self.builder = ir.IRBuilder(block)
+                self.visit(ctx.statement()[i])
+                if not self.builder.basic_block.is_terminated:
+                    self.builder.branch(end_block)
+            self.builder = ir.IRBuilder(end_block)
         else:
-            builder.ret_void()
+            raise SemanticError("Not implemented", ctx)
+
+    def visitJumpStatement(self, ctx: CCompilerParser.JumpStatementContext) -> None:
+        kw = ctx.getChild(0).getText()
+        if kw == 'return':
+            ret_value_ctx = ctx.expression()
+            ret_value = None
+            builder = self.builder
+            if ret_value_ctx is not None:
+                ret_value = self.visit(ret_value_ctx)
+                builder.ret(self.load_lvalue(ret_value))
+            else:
+                builder.ret_void()
+        else:
+            raise SemanticError("Not implemented", ctx)
 
     def load_lvalue(self, lvalue_ptr: TypedValue) -> Union[ir.Value, ir.NamedValue]:
         """
@@ -555,7 +562,7 @@ class Visitor(CCompilerVisitor):
         """
         if not lvalue_ptr.lvalue_ptr or isinstance(lvalue_ptr.type, ir.ArrayType):
             return lvalue_ptr.ir_value
-        builder = self.builders[-1]
+        builder = self.builder
         return builder.load(lvalue_ptr.ir_value)
 
     def store_lvalue(self, value: ir.Value, lvalue_ptr: TypedValue, new_type: ir.Type = None) -> None:
@@ -574,7 +581,7 @@ class Visitor(CCompilerVisitor):
         if not lvalue_ptr.lvalue_ptr:
             lvalue_ptr.ir_value = value
         else:
-            builder = self.builders[-1]
+            builder = self.builder
             builder.store(value, lvalue_ptr.ir_value)
 
         if new_type is not None:
@@ -600,7 +607,7 @@ class Visitor(CCompilerVisitor):
         :return:
         :rtype:
         """
-        builder = self.builders[-1]
+        builder = self.builder
         rvalue = self.load_lvalue(value)
         new_v1, new_v2, new_type = self.bit_extend(rvalue, int32_zero)
         if new_type == double:
@@ -622,7 +629,7 @@ class Visitor(CCompilerVisitor):
         :return:
         :rtype:
         """
-        builder = self.builders[-1]
+        builder = self.builder
         if isinstance(value1.type, ir.types.DoubleType) and not isinstance(value2.type, ir.types.DoubleType):
             new_v1 = value1
             new_v2 = builder.sitofp(value2, double)
@@ -654,7 +661,7 @@ class Visitor(CCompilerVisitor):
         :return: 转换后的 ir.Value
         :rtype:
         """
-        builder = self.builders[-1]
+        builder = self.builder
         ir_value = self.load_lvalue(value)
         if value.type in int_types:
             if type in int_types:
@@ -748,7 +755,7 @@ class Visitor(CCompilerVisitor):
     def visitPostfixExpression_2(self, ctx: CCompilerParser.PostfixExpression_2Context) -> TypedValue:
         # postfixExpression '[' expression ']'
         v1: TypedValue = self.visit(ctx.getChild(0))
-        builder = self.builders[-1]
+        builder = self.builder
         if not v1.lvalue_ptr:
             raise SemanticError('Postfix Expression(#2) needs lvalue.', ctx=ctx)
         is_pointer = isinstance(v1.type, ir.types.PointerType)
@@ -778,7 +785,7 @@ class Visitor(CCompilerVisitor):
         if func is None or not isinstance(func, ir.Function):
             raise SemanticError('Function not declared')
         func: ir.Function
-        builder = self.builders[-1]
+        builder = self.builder
         if ctx.argumentExpressionList():
             argument_expressions = self.visit(ctx.argumentExpressionList())
         else:
@@ -807,7 +814,7 @@ class Visitor(CCompilerVisitor):
     def visitPostfixExpression_4(self, ctx: CCompilerParser.PostfixExpression_4Context) -> TypedValue:
         # postfixExpression '.' Identifier
         v1: TypedValue = self.visit(ctx.getChild(0))
-        builder = self.builders[-1]
+        builder = self.builder
         if not v1.lvalue_ptr:
             raise SemanticError('Postfix Expression(#2) needs lvalue.', ctx=ctx)
         rvalue: ir.NamedValue = self.load_lvalue(v1)
@@ -827,7 +834,7 @@ class Visitor(CCompilerVisitor):
     def visitPostfixExpression_5(self, ctx: CCompilerParser.PostfixExpression_5Context) -> TypedValue:
         # postfixExpression '->' Identifier
         v1: TypedValue = self.visit(ctx.getChild(0))
-        builder = self.builders[-1]
+        builder = self.builder
         rvalue: ir.NamedValue = self.load_lvalue(v1)  # 这里事实上获得一个指针
         if not isinstance(rvalue.type, ir.types.PointerType):
             raise SemanticError("Postfix expression(#5) is not pointer.", ctx=ctx)
@@ -847,7 +854,7 @@ class Visitor(CCompilerVisitor):
     def visitPostfixExpression_6(self, ctx: CCompilerParser.PostfixExpression_6Context) -> TypedValue:
         # postfixExpression '++'
         v1: TypedValue = self.visit(ctx.getChild(0))
-        builder = self.builders[-1]
+        builder = self.builder
         rvalue = self.load_lvalue(v1)
         result = builder.add(rvalue, ir.Constant(v1.type, 1))
         self.store_lvalue(result, v1)
@@ -856,7 +863,7 @@ class Visitor(CCompilerVisitor):
     def visitPostfixExpression_7(self, ctx: CCompilerParser.PostfixExpression_7Context) -> TypedValue:
         # postfixExpression '--'
         v1: TypedValue = self.visit(ctx.getChild(0))
-        builder = self.builders[-1]
+        builder = self.builder
         rvalue = self.load_lvalue(v1)
         result = builder.sub(rvalue, ir.Constant(v1.type, 1))
         self.store_lvalue(result, v1)
@@ -886,7 +893,7 @@ class Visitor(CCompilerVisitor):
     def visitUnaryExpression_2(self, ctx:CCompilerParser.UnaryExpression_2Context) -> TypedValue:
         # '++' unaryExpression
         v1: TypedValue = self.visit(ctx.unaryExpression())
-        builder = self.builders[-1]
+        builder = self.builder
         rvalue = self.load_lvalue(v1)
         result = builder.add(rvalue, ir.Constant(v1.type, 1))
         self.store_lvalue(result, v1)
@@ -895,7 +902,7 @@ class Visitor(CCompilerVisitor):
     def visitUnaryExpression_3(self, ctx:CCompilerParser.UnaryExpression_3Context) -> TypedValue:
         # '--' unaryExpression
         v1 = self.visit(ctx.unaryExpression())
-        builder = self.builders[-1]
+        builder = self.builder
         rvalue = self.load_lvalue(v1)
         result = builder.sub(rvalue, ir.Constant(v1.type, 1))
         self.store_lvalue(result, v1)
@@ -905,7 +912,7 @@ class Visitor(CCompilerVisitor):
         # unaryOperator castExpression
         op: str = ctx.unaryOperator().getText()
         v2: TypedValue = self.visit(ctx.castExpression())
-        builder = self.builders[-1]
+        builder = self.builder
         # '&' | '*' | '+' | '-' | '~' | '!'
         if op == '&':
             # 必须对左值取地址
@@ -961,7 +968,7 @@ class Visitor(CCompilerVisitor):
         rvalue1 = self.load_lvalue(v1)
         rvalue2 = self.load_lvalue(v2)
         new_rvalue1, new_rvalue2, new_type = self.bit_extend(rvalue1, rvalue2, ctx)
-        builder = self.builders[-1]
+        builder = self.builder
         if new_type == double:
             result = builder.fmul(rvalue1, rvalue2)
         else:
@@ -975,7 +982,7 @@ class Visitor(CCompilerVisitor):
         rvalue1 = self.load_lvalue(v1)
         rvalue2 = self.load_lvalue(v2)
         new_rvalue1, new_rvalue2, new_type = self.bit_extend(rvalue1, rvalue2, ctx)
-        builder = self.builders[-1]
+        builder = self.builder
         if new_type == double:
             result = builder.fdiv(rvalue1, rvalue2)
         else:
@@ -989,7 +996,7 @@ class Visitor(CCompilerVisitor):
         rvalue1 = self.load_lvalue(v1)
         rvalue2 = self.load_lvalue(v2)
         new_rvalue1, new_rvalue2, new_type = self.bit_extend(rvalue1, rvalue2, ctx)
-        builder = self.builders[-1]
+        builder = self.builder
         if new_type == double:
             result = builder.frem(rvalue1, rvalue2)
         else:
@@ -1003,7 +1010,7 @@ class Visitor(CCompilerVisitor):
         rvalue1 = self.load_lvalue(v1)
         rvalue2 = self.load_lvalue(v2)
         new_rvalue1, new_rvalue2, new_type = self.bit_extend(rvalue1, rvalue2, ctx)
-        builder = self.builders[-1]
+        builder = self.builder
         if new_type == double:
             result = builder.fadd(rvalue1, rvalue2)
         else:
@@ -1017,7 +1024,7 @@ class Visitor(CCompilerVisitor):
         rvalue1 = self.load_lvalue(v1)
         rvalue2 = self.load_lvalue(v2)
         new_rvalue1, new_rvalue2, new_type = self.bit_extend(rvalue1, rvalue2, ctx)
-        builder = self.builders[-1]
+        builder = self.builder
         if new_type == double:
             result = builder.fsub(rvalue1, rvalue2)
         else:
@@ -1031,7 +1038,7 @@ class Visitor(CCompilerVisitor):
         rvalue1 = self.load_lvalue(v1)
         rvalue2 = self.load_lvalue(v2)
         new_rvalue1, new_rvalue2, new_type = self.bit_extend(rvalue1, rvalue2, ctx)
-        builder = self.builders[-1]
+        builder = self.builder
         if new_type == double:
             raise SemanticError('Bitwise shifting is only available to integer.')
         else:
@@ -1045,7 +1052,7 @@ class Visitor(CCompilerVisitor):
         rvalue1 = self.load_lvalue(v1)
         rvalue2 = self.load_lvalue(v2)
         new_rvalue1, new_rvalue2, new_type = self.bit_extend(rvalue1, rvalue2, ctx)
-        builder = self.builders[-1]
+        builder = self.builder
         if new_type == double:
             raise SemanticError('Bitwise shifting is only available to integer.')
         else:
@@ -1058,7 +1065,7 @@ class Visitor(CCompilerVisitor):
         rvalue1 = self.load_lvalue(v1)
         rvalue2 = self.load_lvalue(v2)
         new_rvalue1, new_rvalue2, new_type = self.bit_extend(rvalue1, rvalue2, ctx)
-        builder = self.builders[-1]
+        builder = self.builder
         if new_type == double:
             result = builder.fcmp_ordered(op, new_rvalue1, new_rvalue2)
         else:
@@ -1097,7 +1104,7 @@ class Visitor(CCompilerVisitor):
         rvalue1 = self.load_lvalue(v1)
         rvalue2 = self.load_lvalue(v2)
         new_rvalue1, new_rvalue2, new_type = self.bit_extend(rvalue1, rvalue2, ctx)
-        builder = self.builders[-1]
+        builder = self.builder
         if new_type == double:
             raise SemanticError('Bitwise operation is only available to integer.')
         else:
@@ -1111,7 +1118,7 @@ class Visitor(CCompilerVisitor):
         rvalue1 = self.load_lvalue(v1)
         rvalue2 = self.load_lvalue(v2)
         new_rvalue1, new_rvalue2, new_type = self.bit_extend(rvalue1, rvalue2, ctx)
-        builder = self.builders[-1]
+        builder = self.builder
         if new_type == double:
             raise SemanticError('Bitwise operation is only available to integer.')
         else:
@@ -1125,7 +1132,7 @@ class Visitor(CCompilerVisitor):
         rvalue1 = self.load_lvalue(v1)
         rvalue2 = self.load_lvalue(v2)
         new_rvalue1, new_rvalue2, new_type = self.bit_extend(rvalue1, rvalue2, ctx)
-        builder = self.builders[-1]
+        builder = self.builder
         if new_type == double:
             raise SemanticError('Bitwise operation is only available to integer.')
         else:
@@ -1138,7 +1145,7 @@ class Visitor(CCompilerVisitor):
         v2: TypedValue = self.visit(ctx.inclusiveOrExpression())
         b1 = self.judge_zero(v1)
         b2 = self.judge_zero(v2)
-        builder = self.builders[-1]
+        builder = self.builder
         result = builder.and_(b1.ir_value, b2.ir_value)
         return TypedValue(result, int1, constant=False, name=None, lvalue_ptr=False)
 
@@ -1148,7 +1155,7 @@ class Visitor(CCompilerVisitor):
         v2: TypedValue = self.visit(ctx.logicalAndExpression())
         b1 = self.judge_zero(v1)
         b2 = self.judge_zero(v2)
-        builder = self.builders[-1]
+        builder = self.builder
         result = builder.or_(b1.ir_value, b2.ir_value)
         return TypedValue(result, int1, constant=False, name=None, lvalue_ptr=False)
 
@@ -1162,7 +1169,7 @@ class Visitor(CCompilerVisitor):
         v1: TypedValue = self.visit(ctx.unaryExpression())
         op: str = ctx.assignmentOperator().getText()
         v3: TypedValue = self.visit(ctx.assignmentExpression())
-        builder = self.builders[-1]
+        builder = self.builder
         # lhs 必须为左值
         if not v1.lvalue_ptr:
             raise SemanticError('Assignment needs a lvalue at left.', ctx=ctx)

@@ -10,25 +10,6 @@ externalDeclaration
     | ';' // stray ;
     ;
 
-statement
-    : expressionStatement
-    | compoundStatement
-    | jumpStatement
-    ;
-
-expressionStatement : expression ';' ;
-
-compoundStatement : '{' blockItemList? '}' ;
-
-jumpStatement
-    : 'continue' ';'              # jumpStatement_1
-    | 'break' ';'                 # jumpStatement_2
-    | 'return' expression? ';'    # jumpStatement_3
-    ;
-
-// simplified
-blockItemList : (statement | declaration)+ ;
-
 constant
     : IntegerConstant
     | FloatingConstant
@@ -154,6 +135,52 @@ expression
 
 constantExpression
     : conditionalExpression
+    ;
+
+statement
+    : compoundStatement
+    | expressionStatement
+    | selectionStatement
+    | jumpStatement
+    | iterationStatement
+    ;
+
+compoundStatement : '{' blockItemList? '}' ;
+
+blockItemList : (statement | declaration)+ ;
+
+expressionStatement : expression? ';' ;
+
+selectionStatement
+    : 'if' '(' expression ')' statement ('else' statement)?
+    | 'switch' '(' expression ')' statement
+    ;
+
+iterationStatement
+    : 'while' '(' expression ')' statement
+    | 'do' statement 'while' '(' expression ')' ';'
+    | 'for' '(' forCondition ')' statement
+    ;
+
+forCondition
+	:   forDeclaration ';' forExpression? ';' forExpression?
+	|   expression? ';' forExpression? ';' forExpression?
+	;
+
+forDeclaration
+    :   declarationSpecifiers initDeclaratorList
+	| 	declarationSpecifiers
+    ;
+
+forExpression
+    :   assignmentExpression
+    |   forExpression ',' assignmentExpression
+    ;
+
+jumpStatement
+    : 'continue' ';'
+    | 'break' ';'
+    | 'return' expression? ';'
     ;
 
 // The full definition is quite complex
