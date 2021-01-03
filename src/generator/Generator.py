@@ -140,9 +140,11 @@ class Visitor(CCompilerVisitor):
 
         # 处理函数体
         self.visit(ctx.compoundStatement())  # funcBody
-        # self.builder may change
         if not self.builder.basic_block.is_terminated:
-            self.builder.ret_void()
+            if function_name == 'main':
+                self.builder.ret(ir.Constant(int32, 0))
+            else:
+                self.builder.ret_void()
 
         # 处理完毕，退出函数作用域
         self.current_function = ''
