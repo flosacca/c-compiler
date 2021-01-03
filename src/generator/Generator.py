@@ -1133,9 +1133,9 @@ class Visitor(CCompilerVisitor):
         new_rvalue1, new_rvalue2, new_type = self.bit_extend(rvalue1, rvalue2, ctx)
         builder = self.builder
         if new_type == double:
-            result = builder.fmul(rvalue1, rvalue2)
+            result = builder.fmul(new_rvalue1, new_rvalue2)
         else:
-            result = builder.mul(rvalue1, rvalue2)
+            result = builder.mul(new_rvalue1, new_rvalue2)
         return TypedValue(result, new_type, constant=False, name=None, lvalue_ptr=False)
 
     def visitMultiplicativeExpression_3(self, ctx:CCompilerParser.MultiplicativeExpression_3Context):
@@ -1147,9 +1147,9 @@ class Visitor(CCompilerVisitor):
         new_rvalue1, new_rvalue2, new_type = self.bit_extend(rvalue1, rvalue2, ctx)
         builder = self.builder
         if new_type == double:
-            result = builder.fdiv(rvalue1, rvalue2)
+            result = builder.fdiv(new_rvalue1, new_rvalue2)
         else:
-            result = builder.sdiv(rvalue1, rvalue2)
+            result = builder.sdiv(new_rvalue1, new_rvalue2)
         return TypedValue(result, new_type, constant=False, name=None, lvalue_ptr=False)
 
     def visitMultiplicativeExpression_4(self, ctx:CCompilerParser.MultiplicativeExpression_4Context):
@@ -1161,9 +1161,9 @@ class Visitor(CCompilerVisitor):
         new_rvalue1, new_rvalue2, new_type = self.bit_extend(rvalue1, rvalue2, ctx)
         builder = self.builder
         if new_type == double:
-            result = builder.frem(rvalue1, rvalue2)
+            result = builder.frem(new_rvalue1, new_rvalue2)
         else:
-            result = builder.srem(rvalue1, rvalue2)
+            result = builder.srem(new_rvalue1, new_rvalue2)
         return TypedValue(result, new_type, constant=False, name=None, lvalue_ptr=False)
 
     def visitAdditiveExpression_2(self, ctx:CCompilerParser.AdditiveExpression_2Context):
@@ -1175,9 +1175,9 @@ class Visitor(CCompilerVisitor):
         new_rvalue1, new_rvalue2, new_type = self.bit_extend(rvalue1, rvalue2, ctx)
         builder = self.builder
         if new_type == double:
-            result = builder.fadd(rvalue1, rvalue2)
+            result = builder.fadd(new_rvalue1, new_rvalue2)
         else:
-            result = builder.add(rvalue1, rvalue2)
+            result = builder.add(new_rvalue1, new_rvalue2)
         return TypedValue(result, new_type, constant=False, name=None, lvalue_ptr=False)
 
     def visitAdditiveExpression_3(self, ctx:CCompilerParser.AdditiveExpression_3Context):
@@ -1189,11 +1189,9 @@ class Visitor(CCompilerVisitor):
         new_rvalue1, new_rvalue2, new_type = self.bit_extend(rvalue1, rvalue2, ctx)
         builder = self.builder
         if new_type == double:
-            result = builder.fsub(rvalue1, rvalue2)
+            result = builder.fsub(new_rvalue1, new_rvalue2)
         else:
-            # This does not work
-            # result = builder.ssub_with_overflow(rvalue1, rvalue2)
-            result = builder.sub(rvalue1, rvalue2)
+            result = builder.sub(new_rvalue1, new_rvalue2)
         return TypedValue(result, new_type, constant=False, name=None, lvalue_ptr=False)
 
     def visitShiftExpression_2(self, ctx:CCompilerParser.ShiftExpression_2Context):
@@ -1207,7 +1205,7 @@ class Visitor(CCompilerVisitor):
         if new_type == double:
             raise SemanticError('Bitwise shifting is only available to integer.')
         else:
-            result = builder.shl(rvalue1, rvalue2)
+            result = builder.shl(new_rvalue1, new_rvalue2)
         return TypedValue(result, new_type, constant=False, name=None, lvalue_ptr=False)
 
     def visitShiftExpression_3(self, ctx:CCompilerParser.ShiftExpression_3Context):
@@ -1221,7 +1219,7 @@ class Visitor(CCompilerVisitor):
         if new_type == double:
             raise SemanticError('Bitwise shifting is only available to integer.')
         else:
-            result = builder.ashr(rvalue1, rvalue2)
+            result = builder.ashr(new_rvalue1, new_rvalue2)
         return TypedValue(result, new_type, constant=False, name=None, lvalue_ptr=False)
 
     def _relational_expression(self, op: str, ctx: ParserRuleContext):
@@ -1234,7 +1232,7 @@ class Visitor(CCompilerVisitor):
         if new_type == double:
             result = builder.fcmp_ordered(op, new_rvalue1, new_rvalue2)
         else:
-            result = builder.add(rvalue1, rvalue2)
+            result = builder.add(new_rvalue1, new_rvalue2)
             result = builder.icmp_signed(op, new_rvalue1, new_rvalue2)
         return TypedValue(result, int1, constant=False, name=None, lvalue_ptr=False)
 
@@ -1273,7 +1271,7 @@ class Visitor(CCompilerVisitor):
         if new_type == double:
             raise SemanticError('Bitwise operation is only available to integer.')
         else:
-            result = builder.and_(rvalue1, rvalue2)
+            result = builder.and_(new_rvalue1, new_rvalue2)
         return TypedValue(result, new_type, constant=False, name=None, lvalue_ptr=False)
 
     def visitExclusiveOrExpression_2(self, ctx:CCompilerParser.ExclusiveOrExpression_2Context):
@@ -1287,7 +1285,7 @@ class Visitor(CCompilerVisitor):
         if new_type == double:
             raise SemanticError('Bitwise operation is only available to integer.')
         else:
-            result = builder.xor(rvalue1, rvalue2)
+            result = builder.xor(new_rvalue1, new_rvalue2)
         return TypedValue(result, new_type, constant=False, name=None, lvalue_ptr=False)
 
     def visitInclusiveOrExpression_2(self, ctx:CCompilerParser.InclusiveOrExpression_2Context):
@@ -1301,7 +1299,7 @@ class Visitor(CCompilerVisitor):
         if new_type == double:
             raise SemanticError('Bitwise operation is only available to integer.')
         else:
-            result = builder.or_(rvalue1, rvalue2)
+            result = builder.or_(new_rvalue1, new_rvalue2)
         return TypedValue(result, new_type, constant=False, name=None, lvalue_ptr=False)
 
     def visitLogicalAndExpression_2(self, ctx:CCompilerParser.LogicalAndExpression_2Context):
@@ -1376,7 +1374,7 @@ class Visitor(CCompilerVisitor):
         elif op == '-=':
             tmp = self.convert_type(v3, v1.type, ctx=ctx)
             if v1.type != double:
-                result = builder.ssub_with_overflow(rvalue1, tmp)
+                result = builder.sub(rvalue1, tmp)
             else:
                 result = builder.fsub(rvalue1, tmp)
         elif op == '<<=':
