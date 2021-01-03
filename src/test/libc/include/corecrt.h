@@ -3,6 +3,7 @@
 
 // ignore unsigned
 #define unsigned
+#define NULL (0)
 
 typedef int                           errno_t;
 typedef unsigned short                wint_t;

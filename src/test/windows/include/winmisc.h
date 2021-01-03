@@ -18,4 +18,10 @@ WINAPI void Sleep(DWORD dwMilliseconds);
 
 WINAPI BOOL SetConsoleCursorInfo(HANDLE hConsoleOutput, CONST CONSOLE_CURSOR_INFO* lpConsoleCursorInfo);
 
+int _kbhit();
+
+int _getch();
+
+wint_t _getwch();
+
 #endif

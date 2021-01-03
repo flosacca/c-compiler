@@ -158,8 +158,10 @@ selectionStatement
 iterationStatement
     : 'while' '(' expression ')' statement
     | 'do' statement 'while' '(' expression ')' ';'
-    | 'for' '(' first=forInitialization ';' second=expression? ';' third=expression? ')' statement
+    | 'for' '(' first=forInitialization ';' second=forExpression? ';' third=forExpression? ')' statement
     ;
+
+forExpression : expression;
 
 forInitialization : expression? | forDeclaration ;
 
@@ -170,7 +172,7 @@ jumpStatement
     ;
 
 // The full definition is quite complex
-typeName : Identifier pointer? ;
+typeName : typeSpecifier ;
 
 pointer
     : qualifiedPointer
@@ -228,6 +230,7 @@ declarationSpecifier
 
 storageClassSpecifier
     : 'typedef'
+    | 'extern'
     ;
 
 functionSpecifier

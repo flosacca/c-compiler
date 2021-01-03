@@ -3,19 +3,19 @@
 
 int check(const char* s) {
     int n = strlen(s);
-    for (int i = n / 2; ~i; --i)
-        if (s[i] != s[n - i - 1]) {
-            printf("mismatch at %d\n", i);
-            return 0;
-        }
-    return 1;
+    for (int i = 0; i < n / 2; ++i) {
+        if (s[i] != s[n - i - 1])
+            return i;
+    }
+    return -1;
 }
 
 int main() {
-    const char* s = "ababa";
-    if (check(s))
-        puts("yes");
+    char s[1000];
+    scanf("%s", s);
+    int i = check(s);
+    if (~i)
+        printf("failed at %d\n", i);
     else
-        puts("no");
-    return 0;
+        puts("ok");
 }

@@ -1,6 +1,8 @@
 #ifndef _STDLIB_H_
 #define _STDLIB_H_
 
+#define RAND_MAX 32767
+
 __cdecl int atoi (const char *_1);
 __cdecl long atol (const char *_1);
 

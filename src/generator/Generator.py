@@ -58,7 +58,7 @@ class Visitor(CCompilerVisitor):
         self.structure: Structure = Structure()
 
         # 当前所在函数名
-        self.current_function: str = ''
+        self.current_function: ir.Function = None
         self.constants = 0
 
         # 符号表
@@ -136,7 +136,7 @@ class Visitor(CCompilerVisitor):
         self.builder = ir.IRBuilder(block)
 
         # 进入函数作用域
-        self.current_function = function_name
+        self.current_function = llvm_function
         self.symbol_table.enter_scope()
 
         # 存储函数的变量
@@ -385,8 +385,14 @@ class Visitor(CCompilerVisitor):
                                                                           constant=False,
                                                                           name=identifier,
                                                                           lvalue_ptr=True))
-                        if initializer is not None:
-                            variable.initializer = self.load_lvalue(initializer)
+                        if specifiers.is_extern():
+                            if initializer is not None:
+                                raise SemanticError("External variable cannot be initialized.")
+                        else:
+                            if initializer is not None:
+                                variable.initializer = self.load_lvalue(initializer)
+                            else:
+                                variable.initializer = ir.Constant(typ, None)
                 else:
                     ir_builder = self.builder
                     variable = ir_builder.alloca(typ, 1, identifier)
@@ -561,18 +567,17 @@ class Visitor(CCompilerVisitor):
         kw = ctx.getChild(0).getText()
         if kw == 'if':
             has_else = len(ctx.statement()) > 1
-            builder = self.builder
-            block_true = builder.append_basic_block(name='if.then')
+            block_true = self.builder.append_basic_block(name='if.then')
             blocks = [block_true]
             if has_else:
-                block_false = builder.append_basic_block(name='if.else')
-                block_end = builder.append_basic_block(name='if.end')
+                block_false = self.builder.append_basic_block(name='if.else')
+                block_end = self.builder.append_basic_block(name='if.end')
                 blocks.append(block_false)
             else:
-                block_end = builder.append_basic_block(name='if.end')
+                block_end = self.builder.append_basic_block(name='if.end')
                 block_false = block_end
             cond = self.ir_bool(self.visit(ctx.expression()))
-            builder.cbranch(cond, block_true, block_false)
+            self.builder.cbranch(cond, block_true, block_false)
             for i, block in enumerate(blocks):
                 self.builder = ir.IRBuilder(block)
                 self.visit(ctx.statement()[i])
@@ -658,8 +663,10 @@ class Visitor(CCompilerVisitor):
             ret_value = None
             builder = self.builder
             if ret_value_ctx is not None:
-                ret_value = self.visit(ret_value_ctx)
-                builder.ret(self.load_lvalue(ret_value))
+                ret_value = self.convert_type(self.visit(ret_value_ctx),
+                                              self.current_function.function_type.return_type,
+                                              ctx)
+                builder.ret(ret_value)
             else:
                 builder.ret_void()
             return
@@ -1145,11 +1152,13 @@ class Visitor(CCompilerVisitor):
 
     def visitCastExpression_1(self, ctx: CCompilerParser.CastExpression_1Context) -> TypedValue:
         # '(' typeName ')' castExpression
-        # TODO 需要直到 type 在哪里获取
-        raise SemanticError('Not implemented yet.', ctx=ctx)
+        base_type = self.visit(ctx.typeName())
+        value = self.convert_type(self.visit(ctx.castExpression()), base_type, ctx)
+        return TypedValue(ir_value=value, typ=base_type, constant=False, name=None, lvalue_ptr=False)
 
     def visitCastExpression_2(self, ctx: CCompilerParser.CastExpression_2Context) -> TypedValue:
         # unaryExpression
+
         return self.visitChildren(ctx)
 
     def visitMultiplicativeExpression_2(self, ctx: CCompilerParser.MultiplicativeExpression_2Context):

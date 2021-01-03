@@ -36,7 +36,7 @@ __cdecl char *ctime (const time_t *_1);
 __cdecl struct tm *gmtime (const time_t *_1);
 __cdecl struct tm *localtime (const time_t *_1);
 
-__cdecl size_t strftime (char *_1, size_t, const char *_2, const struct tm * _3);
+__cdecl size_t strftime (char *_1, size_t _2, const char *_3, const struct tm * _4);
 
 __cdecl char *_strdate (char *_1);
 __cdecl char *_strtime (char *_1);

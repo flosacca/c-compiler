@@ -10,13 +10,15 @@
 
 #define VOID void
 #define CONST const
+#define TRUE 1
+#define FALSE 0
 
 typedef unsigned long       DWORD;
 typedef int                 BOOL;
 typedef unsigned char       BYTE;
 typedef unsigned short      WORD;
-typedef float               FLOAT;
-typedef FLOAT               *PFLOAT;
+// typedef float               FLOAT;
+// typedef FLOAT               *PFLOAT;
 typedef BOOL                *PBOOL;
 typedef BOOL                *LPBOOL;
 typedef BYTE                *PBYTE;

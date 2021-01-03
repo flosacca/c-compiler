@@ -25,7 +25,7 @@ typedef struct _iobuf
   char	*_tmpfname;
 } FILE;
 
-FILE _iob[];	/* An array of FILE imported from DLL. */
+extern FILE _iob[];	/* An array of FILE imported from DLL. */
 
 __cdecl FILE * fopen (const char * _1, const char * _2);
 __cdecl FILE * freopen (const char * _1, const char * _2, FILE * _3);

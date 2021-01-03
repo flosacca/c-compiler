@@ -49,6 +49,12 @@ class DeclarationSpecifiers:
                 return True
         return False
 
+    def is_extern(self):
+        for (typ, val) in self.specifiers:
+            if typ == "storage" and val == "extern":
+                return True
+        return False
+
 
 class ParameterList:
 

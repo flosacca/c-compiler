@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <windows.h>
+#include <time.h>
 //#include <conio.h>
 
 // Sercan BAYRAMBEY  https://github.com/sercanbayrambey/C-Snake-Game
@@ -10,7 +11,7 @@ void gameLoop();
 void draw();
 void FoodGenerator();
 void Start();
-int random();
+int random(int a, int b);
 void Movement();
 char GetKey();
 void Reset();
@@ -48,6 +49,7 @@ const int FPS = 30;
 int main()
 {
 	Start();
+	return 0;
 }
 
 void Start()
@@ -199,20 +201,20 @@ char getKey()
 		else
 			return '-';
 	}
-
+    return 0;
 }
 
 void Movement()
 {
 	int i, tempy, tempx;
 	char key = getKey();
-	if (key == 'W')
+	if (key == 'W' && direction != DOWN)
 		direction = UP;
-	else if (key == 'S')
+	else if (key == 'S' && direction != UP)
 		direction = DOWN;
-	else if (key == 'A')
+	else if (key == 'A' && direction != RIGHT)
 		direction = LEFT;
-	else if (key == 'D')
+	else if (key == 'D' && direction != LEFT)
 		direction = RIGHT;
 
 }
@@ -254,8 +256,7 @@ void Reset()
 	Sleep(3000);
 }
 
-void hidecursor() // THIS FOR HIDE CONSOLE CURSOR
-{
+void hidecursor() {
 	HANDLE consoleHandle = GetStdHandle(STD_OUTPUT_HANDLE);
 	CONSOLE_CURSOR_INFO info;
 	info.dwSize = 100;
@@ -265,6 +266,5 @@ void hidecursor() // THIS FOR HIDE CONSOLE CURSOR
 
 
 int random(int min, int max) {
-
 	return min + rand() / (RAND_MAX / (max - min + 1) + 1);
 }
