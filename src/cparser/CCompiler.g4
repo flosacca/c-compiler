@@ -185,7 +185,7 @@ typeQualifier : 'const' | 'volatile' ;
 
 // simplified to typeSpecifier
 functionDefinition
-    : declarationSpecifiers? declarator compoundStatement
+    : declarationSpecifiers declarator compoundStatement
     ;
 
 declaration : forDeclaration ';' ;

@@ -49,7 +49,7 @@ __cdecl int    fputc (int _1, FILE *_2);
 __cdecl int    fputs (const char *_1, FILE *_2);
 __cdecl char * gets (char *_1);
 __cdecl int    puts (const char *_1);
-__cdecl int    ungetc (int_1, FILE *_2);
+__cdecl int    ungetc (int _1, FILE *_2);
 __cdecl int    getchar();
 __cdecl int    putchar(int _1);
 

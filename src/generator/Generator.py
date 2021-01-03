@@ -183,7 +183,7 @@ class Visitor(CCompilerVisitor):
         """
         directDeclarator : directDeclarator '[' assignmentExpression? ']'
         """
-        arr_len = -1  # todo: 想一个别的办法处理一下
+        arr_len = 0
         if ctx.assignmentExpression() is not None:
             exp_const: ir.Constant = self.visit(ctx.assignmentExpression()).ir_value
             if isinstance(exp_const, ir.Constant):
@@ -192,8 +192,8 @@ class Visitor(CCompilerVisitor):
                 raise SemanticError("数组的长度必须是常量表达式", ctx)
         declarator_func = self.visit(ctx.directDeclarator())
 
-        def create_arr_ret(typ: ir.Type, _):
-            id1, typ1, pl = declarator_func(typ)
+        def create_arr_ret(typ: ir.Type, specifiers):
+            id1, typ1, pl = declarator_func(typ, specifiers)
             return id1, ir.ArrayType(typ1, arr_len), pl
 
         return create_arr_ret
@@ -715,7 +715,7 @@ class Visitor(CCompilerVisitor):
             raise SemanticError("Unspecified declarator type", ctx)
         member_list = []
         for decl in decl_list:
-            identifier, typ, parameter_list = decl(base_type)
+            identifier, typ, parameter_list = decl(base_type, specifiers)
             if specifiers.is_typedef():
                 raise SemanticError("Illegal typedef here")
             member_list.append((typ, identifier))
