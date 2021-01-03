@@ -341,8 +341,6 @@ class Visitor(CCompilerVisitor):
                 print("using type", identifier, "=", typ)
             else:
                 if self.is_global_scope():
-                    if initializer is not None:
-                        raise SemanticError("Cannot initialize global variable(s)", ctx)
                     if self.symbol_table.exist(identifier):
                         raise SemanticError("Symbol redefined: " + identifier, ctx)
                     if isinstance(typ, ir.FunctionType):
@@ -356,6 +354,8 @@ class Visitor(CCompilerVisitor):
                                                                           constant=False,
                                                                           name=identifier,
                                                                           lvalue_ptr=True))
+                        if initializer is not None:
+                            variable.initializer = self.load_lvalue(initializer)
                 else:
                     ir_builder = self.builder
                     variable = ir_builder.alloca(typ, 1, identifier)
@@ -892,7 +892,7 @@ class Visitor(CCompilerVisitor):
             else:
                 if isinstance(argument_expressions[i].type, ir.ArrayType):
                     func_args.append(self.convert_type(argument_expressions[i],
-                                                       argument_expressions[i].type.element.pointer,
+                                                       argument_expressions[i].type.element.as_pointer(),
                                                        ctx))
                 else:
                     func_args.append(self.load_lvalue(argument_expressions[i]))

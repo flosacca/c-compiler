@@ -218,7 +218,7 @@ initializerList
     | initializerList ',' initializer
     ;
 
-declarationSpecifiers: declarationSpecifier* ;
+declarationSpecifiers: declarationSpecifier+ ;
 
 declarationSpecifier
     : storageClassSpecifier
