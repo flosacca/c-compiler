@@ -526,12 +526,31 @@ class Visitor(CCompilerVisitor):
             else:
                 end_block = false_block
             cond = self.visit(ctx.expression())
-            builder.cbranch(self.convert_type(cond, int1, ctx=ctx), true_block, false_block)
+            builder.cbranch(self.to_boolean(cond).ir_value, true_block, false_block)
             for i, block in enumerate(blocks):
                 self.builder = ir.IRBuilder(block)
                 self.visit(ctx.statement()[i])
                 if not self.builder.basic_block.is_terminated:
                     self.builder.branch(end_block)
+            self.builder = ir.IRBuilder(end_block)
+        else:
+            raise SemanticError("Not implemented", ctx)
+
+    def visitIterationStatement(self, ctx: CCompilerParser.SelectionStatementContext) -> None:
+        kw = ctx.getChild(0).getText()
+        if kw == 'while':
+            # 'while' '(' expression ')' statement
+            start_block = self.builder.append_basic_block()
+            cond_block = self.builder.append_basic_block()
+            end_block = self.builder.append_basic_block()
+            self.builder.branch(cond_block)
+            self.builder = ir.IRBuilder(cond_block)
+            cond = self.visit(ctx.expression())
+            self.builder.cbranch(self.to_boolean(cond).ir_value, start_block, end_block)
+            self.builder = ir.IRBuilder(start_block)
+            self.visit(ctx.statement())
+            if not self.builder.basic_block.is_terminated:
+                self.builder.branch(cond_block)
             self.builder = ir.IRBuilder(end_block)
         else:
             raise SemanticError("Not implemented", ctx)
@@ -598,22 +617,26 @@ class Visitor(CCompilerVisitor):
         self.string_constants[str_value] = typed_value
         return typed_value
 
-    def judge_zero(self, value: TypedValue) -> TypedValue:
+    def to_boolean(self, value: TypedValue, negation: bool = False) -> TypedValue:
         """
-        判断一个 value 是否为 0，用于 '!' '&&' '||' 运算符.
+        根据值是否为 0 转为 int1
 
         :param value:
         :type value:
         :return:
         :rtype:
         """
+        if negation:
+            op = '=='
+        else:
+            op = '!='
         builder = self.builder
         rvalue = self.load_lvalue(value)
         new_v1, new_v2, new_type = self.bit_extend(rvalue, int32_zero)
         if new_type == double:
-            result: ir.Instruction = builder.fcmp_ordered('==', new_v1, new_v2)
+            result: ir.Instruction = builder.fcmp_ordered(op, new_v1, new_v2)
         else:
-            result: ir.Instruction = builder.icmp_signed('==', new_v1, new_v2)
+            result: ir.Instruction = builder.icmp_signed(op, new_v1, new_v2)
         return TypedValue(result, int1, constant=False, name=None, lvalue_ptr=False)
 
     def bit_extend(self, value1, value2, ctx=None) -> Tuple[Any, Any, ir.Type]:
@@ -940,7 +963,7 @@ class Visitor(CCompilerVisitor):
             result: ir.Instruction = builder.not_(rvalue)
             return TypedValue(result, v2.type, constant=False, name=None, lvalue_ptr=False)
         elif op == '!':
-            return self.judge_zero(v2)
+            return self.to_boolean(v2, negation=True)
 
     def visitUnaryExpression_5(self, ctx:CCompilerParser.UnaryExpression_5Context) -> TypedValue:
         # 'sizeof' unaryExpression
@@ -1143,8 +1166,8 @@ class Visitor(CCompilerVisitor):
         # logicalAndExpression '&&' inclusiveOrExpression
         v1: TypedValue = self.visit(ctx.logicalAndExpression())
         v2: TypedValue = self.visit(ctx.inclusiveOrExpression())
-        b1 = self.judge_zero(v1)
-        b2 = self.judge_zero(v2)
+        b1 = self.to_boolean(v1)
+        b2 = self.to_boolean(v2)
         builder = self.builder
         result = builder.and_(b1.ir_value, b2.ir_value)
         return TypedValue(result, int1, constant=False, name=None, lvalue_ptr=False)
@@ -1153,8 +1176,8 @@ class Visitor(CCompilerVisitor):
         # logicalOrExpression '||' logicalAndExpression
         v1: TypedValue = self.visit(ctx.logicalOrExpression())
         v2: TypedValue = self.visit(ctx.logicalAndExpression())
-        b1 = self.judge_zero(v1)
-        b2 = self.judge_zero(v2)
+        b1 = self.to_boolean(v1)
+        b2 = self.to_boolean(v2)
         builder = self.builder
         result = builder.or_(b1.ir_value, b2.ir_value)
         return TypedValue(result, int1, constant=False, name=None, lvalue_ptr=False)
