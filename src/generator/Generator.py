@@ -127,8 +127,8 @@ class Visitor(CCompilerVisitor):
         # 存储函数的变量
         for i in range(len(parameter_list)):
             func_arg = llvm_function.args[i]
-            variable = ir_builder.alloca(func_arg.type)
-            ir_builder.store(func_arg, variable)
+            variable = self.builder.alloca(func_arg.type)
+            self.builder.store(func_arg, variable)
             result = self.symbol_table.add_item(func_arg.name, TypedValue(ir_value=variable,
                                                                           typ=func_arg.type,
                                                                           constant=False,
@@ -540,7 +540,8 @@ class Visitor(CCompilerVisitor):
             else:
                 end_block = false_block
             cond = self.visit(ctx.expression())
-            builder.cbranch(self.to_boolean(cond).ir_value, true_block, false_block)
+            cond = self.to_boolean(cond)
+            builder.cbranch(cond.ir_value, true_block, false_block)
             for i, block in enumerate(blocks):
                 self.builder = ir.IRBuilder(block)
                 self.visit(ctx.statement()[i])
@@ -578,10 +579,11 @@ class Visitor(CCompilerVisitor):
             if ctx.second:
                 cond = self.visit(ctx.second)
             else:
-                cond = int1(1)
+                cond = const_value(ir.Constant(int1, 1))
         else:
             cond = self.visit(ctx.expression())
-        self.builder.cbranch(self.to_boolean(cond).ir_value, block_body, block_end)
+        cond = self.to_boolean(cond)
+        self.builder.cbranch(cond.ir_value, block_body, block_end)
         if ctx.third:
             block_update = self.builder.append_basic_block()
             self.builder = ir.IRBuilder(block_update)
@@ -1114,7 +1116,9 @@ class Visitor(CCompilerVisitor):
         if new_type == double:
             result = builder.fsub(rvalue1, rvalue2)
         else:
-            result = builder.ssub_with_overflow(rvalue1, rvalue2)
+            # This does not work
+            # result = builder.ssub_with_overflow(rvalue1, rvalue2)
+            result = builder.sub(rvalue1, rvalue2)
         return TypedValue(result, new_type, constant=False, name=None, lvalue_ptr=False)
 
     def visitShiftExpression_2(self, ctx:CCompilerParser.ShiftExpression_2Context):
@@ -1247,8 +1251,14 @@ class Visitor(CCompilerVisitor):
 
     def visitConditionalExpression(self, ctx:CCompilerParser.ConditionalExpressionContext):
         # logicalOrExpression ('?' expression ':' conditionalExpression)?
-        # TODO
-        return self.visitChildren(ctx)
+        cond = self.visit(ctx.logicalOrExpression())
+        if ctx.getChildCount() == 1:
+            return cond
+        v1: TypedValue = self.visit(ctx.expression())
+        v2: TypedValue = self.visit(ctx.conditionalExpression())
+        cond = self.to_boolean(cond)
+        result = self.builder.select(cond.ir_value, v1.ir_value, v2.ir_value)
+        return TypedValue(result, result.type, constant=False, name=None, lvalue_ptr=False)
 
     def visitAssignmentExpression_2(self, ctx:CCompilerParser.AssignmentExpression_2Context):
         # unaryExpression assignmentOperator assignmentExpression
