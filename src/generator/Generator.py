@@ -533,14 +533,15 @@ class Visitor(CCompilerVisitor):
         if kw == 'if':
             has_else = len(ctx.statement()) > 1
             builder = self.builder
-            block_true = builder.append_basic_block()
-            block_false = builder.append_basic_block()
+            block_true = builder.append_basic_block(name='if.then')
             blocks = [block_true]
             if has_else:
+                block_false = builder.append_basic_block(name='if.else')
+                block_end = builder.append_basic_block(name='if.end')
                 blocks.append(block_false)
-                block_end = builder.append_basic_block()
             else:
-                block_end = block_false
+                block_end = builder.append_basic_block(name='if.end')
+                block_false = block_end
             cond = self.ir_bool(self.visit(ctx.expression()))
             builder.cbranch(cond, block_true, block_false)
             for i, block in enumerate(blocks):
@@ -566,9 +567,9 @@ class Visitor(CCompilerVisitor):
         if ctx.first:
             self.symbol_table.enter_scope()
             self.visit(ctx.first)
-        block_cond = self.builder.append_basic_block()
-        block_body = self.builder.append_basic_block()
-        block_end = self.builder.append_basic_block()
+        block_cond = self.builder.append_basic_block(name='loop.cond')
+        block_body = self.builder.append_basic_block(name='loop.body')
+        block_end = self.builder.append_basic_block(name='loop.end')
         # Terminate last block
         if kw == 'do':
             self.builder.branch(block_body)
@@ -582,7 +583,7 @@ class Visitor(CCompilerVisitor):
             cond = self.ir_bool(self.visit(ctx.second or ctx.expression()))
             self.builder.cbranch(cond, block_body, block_end)
         if ctx.third:
-            block_update = self.builder.append_basic_block()
+            block_update = self.builder.append_basic_block(name='loop.update')
             self.builder = ir.IRBuilder(block_update)
             self.visit(ctx.third)
             self.builder.branch(block_cond)
@@ -940,7 +941,6 @@ class Visitor(CCompilerVisitor):
         if func is None or not isinstance(func, ir.Function):
             raise SemanticError('Function not declared')
         func: ir.Function
-        builder = self.builder
         if ctx.argumentExpressionList():
             argument_expressions = self.visit(ctx.argumentExpressionList())
         else:
@@ -963,7 +963,7 @@ class Visitor(CCompilerVisitor):
                                                        ctx))
                 else:
                     func_args.append(self.load_lvalue(argument_expressions[i]))
-        ret_value = builder.call(func, func_args)
+        ret_value = self.builder.call(func, func_args)
         return TypedValue(ir_value=ret_value, typ=ret_value.type, constant=False, name=None, lvalue_ptr=False)
 
     def visitPostfixExpression_4(self, ctx: CCompilerParser.PostfixExpression_4Context) -> TypedValue:
@@ -1340,14 +1340,32 @@ class Visitor(CCompilerVisitor):
 
     def visitConditionalExpression(self, ctx: CCompilerParser.ConditionalExpressionContext):
         # logicalOrExpression ('?' expression ':' conditionalExpression)?
-        cond = self.visit(ctx.logicalOrExpression())
+        first = self.visit(ctx.logicalOrExpression())
         if ctx.getChildCount() == 1:
-            return cond
-        v1: TypedValue = self.visit(ctx.expression())
-        v2: TypedValue = self.visit(ctx.conditionalExpression())
-        cond = self.typed_bool(cond)
-        result = self.builder.select(cond.ir_value, v1.ir_value, v2.ir_value)
-        return TypedValue(result, result.type, constant=False, name=None, lvalue_ptr=False)
+            return first
+
+        block_true = self.builder.append_basic_block(name='ternary.true')
+        block_false = self.builder.append_basic_block(name='ternary.false')
+        block_end = self.builder.append_basic_block(name='ternary.end')
+
+        cond = self.ir_bool(first)
+        self.builder.cbranch(cond, block_true, block_false)
+
+        self.builder = ir.IRBuilder(block_true)
+        value_true = self.visit(ctx.expression()).ir_value
+        self.builder.branch(block_end)
+        block_true = self.builder.basic_block
+
+        self.builder = ir.IRBuilder(block_false)
+        value_false = self.visit(ctx.conditionalExpression()).ir_value
+        self.builder.branch(block_end)
+        block_false = self.builder.basic_block
+
+        self.builder = ir.IRBuilder(block_end)
+        result = self.builder.phi(value_true.type)
+        result.add_incoming(value_true, block_true)
+        result.add_incoming(value_false, block_false)
+        return TypedValue(result, int1, constant=False, name=None, lvalue_ptr=False)
 
     def visitAssignmentExpression_2(self, ctx: CCompilerParser.AssignmentExpression_2Context):
         # unaryExpression assignmentOperator assignmentExpression
