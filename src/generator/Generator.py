@@ -577,11 +577,15 @@ class Visitor(CCompilerVisitor):
             self.builder.branch(block_cond)
         # Build blocks
         self.builder = ir.IRBuilder(block_cond)
-        if kw == 'for' and ctx.second is None:
-            self.builder.branch(block_body)
+        if kw == 'for':
+            cond_ctx = ctx.second
         else:
-            cond = self.ir_bool(self.visit(ctx.second or ctx.expression()))
+            cond_ctx = ctx.expression()
+        if cond_ctx:
+            cond = self.ir_bool(self.visit(cond_ctx))
             self.builder.cbranch(cond, block_body, block_end)
+        else:
+            self.builder.branch(block_body)
         if ctx.third:
             block_update = self.builder.append_basic_block(name='loop.update')
             self.builder = ir.IRBuilder(block_update)

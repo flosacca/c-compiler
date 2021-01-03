@@ -158,10 +158,12 @@ selectionStatement
 iterationStatement
     : 'while' '(' expression ')' statement
     | 'do' statement 'while' '(' expression ')' ';'
-    | 'for' '(' first=forInitialization ';' second=expression? ';' third=expression? ')' statement
+    | 'for' '(' first=forInitialization ';' second=forExpression? ';' third=forExpression? ')' statement
     ;
 
 forInitialization : expression? | forDeclaration ;
+
+forExpression : expression ;
 
 jumpStatement
     : 'continue' ';'
