@@ -260,6 +260,26 @@ typeSpecifier
     : primitiveType           # typeSpecifier_1
     | typedefName             # typeSpecifier_2
     | typeSpecifier pointer   # typeSpecifier_3
+    | structSpecifier         # typeSpecifier_4
+    ;
+
+structSpecifier
+    :   'struct' Identifier? '{' structDeclarationList? '}' # structSpecifier_1
+    |   'struct' Identifier                                 # structSpecifier_2
+    ;
+
+structDeclarationList
+    :   structDeclaration
+    |   structDeclarationList structDeclaration
+    ;
+
+structDeclaration
+    :   declarationSpecifiers structDeclaratorList ';'
+    ;
+
+structDeclaratorList
+    :   declarator
+    |   structDeclaratorList ',' declarator
     ;
 
 primitiveType

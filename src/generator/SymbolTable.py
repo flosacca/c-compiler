@@ -101,7 +101,7 @@ class SymbolTable:
         建立符号表.
         """
         # table：table[i]是一个字典，存着key，value组
-        self.table: List[Dict[str, Union[TypedValue, ir.Type]]] = [{}]
+        self.table: List[Dict[str, Union[TypedValue, ir.Type, ir.Function]]] = [{}]
         self.current_level: int = 0
 
     def get_item(self, item: str) -> Optional[Union[TypedValue, ir.Type, ir.Function]]:
@@ -177,6 +177,28 @@ class SymbolTable:
             bool
         """
         return len(self.table) == 1
+
+
+class ElementNamedLiteralStructType(ir.LiteralStructType):
+    """
+    成员具名结构体类类型封装
+    """
+
+    def __init__(self, elems: List[ir.Type], names: List[str], packed=False):
+        """
+        *elems* is a sequence of types to be used as members.
+        *packed* controls the use of packed layout.
+        """
+        ir.LiteralStructType.__init__(self, elems, packed)
+        self.names = tuple(names)
+
+    def index(self, name: str) -> int:
+        """
+        寻找名字对应的下标. 找不到时抛出异常
+        @param name: 名字
+        @return: 下标
+        """
+        return self.names.index(name)
 
 
 class Structure:
