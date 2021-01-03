@@ -158,12 +158,10 @@ selectionStatement
 iterationStatement
     : 'while' '(' expression ')' statement
     | 'do' statement 'while' '(' expression ')' ';'
-    | 'for' '(' first=forInitialization ';' second=forExpression? ';' third=forExpression? ')' statement
+    | 'for' '(' first=forInitialization ';' second=expression? ';' third=expression? ')' statement
     ;
 
 forInitialization : expression? | forDeclaration ;
-
-forExpression : expression ;
 
 jumpStatement
     : 'continue' ';'
@@ -187,7 +185,7 @@ typeQualifier : 'const' | 'volatile' ;
 
 // simplified to typeSpecifier
 functionDefinition
-    : typeSpecifier declarator compoundStatement
+    : declarationSpecifiers? declarator compoundStatement
     ;
 
 declaration : forDeclaration ';' ;
@@ -225,10 +223,18 @@ declarationSpecifier
     : storageClassSpecifier
     | typeSpecifier
     | typeQualifier
+    | functionSpecifier
     ;
 
 storageClassSpecifier
     : 'typedef'
+    ;
+
+functionSpecifier
+    :   ('inline'
+    |   '__stdcall'
+    |   '__cdecl')
+    |   '__declspec' '(' Identifier ')'
     ;
 
 parameterTypeList
