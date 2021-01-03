@@ -33,7 +33,6 @@ postfixExpression
     | postfixExpression '--'                              # postfixExpression_7
     ;
 
-// 暂时不做
 argumentExpressionList
     : assignmentExpression
     | argumentExpressionList ',' assignmentExpression
@@ -106,13 +105,13 @@ inclusiveOrExpression
     ;
 
 logicalAndExpression
-    : inclusiveOrExpression                           # logicalAndExpression_1
-    | logicalAndExpression '&&' inclusiveOrExpression # logicalAndExpression_2
+    : inclusiveOrExpression
+    | logicalAndExpression '&&' inclusiveOrExpression
     ;
 
 logicalOrExpression
-    : logicalAndExpression                            # logicalOrExpression_1
-    | logicalOrExpression '||' logicalAndExpression   # logicalOrExpression_2
+    : logicalAndExpression
+    | logicalOrExpression '||' logicalAndExpression
     ;
 
 conditionalExpression
@@ -159,10 +158,12 @@ selectionStatement
 iterationStatement
     : 'while' '(' expression ')' statement
     | 'do' statement 'while' '(' expression ')' ';'
-    | 'for' '(' first=forInitialization ';' second=expression? ';' third=expression? ')' statement
+    | 'for' '(' first=forInitialization ';' second=forExpression? ';' third=forExpression? ')' statement
     ;
 
 forInitialization : expression? | forDeclaration ;
+
+forExpression : expression ;
 
 jumpStatement
     : 'continue' ';'
