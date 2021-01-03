@@ -17,7 +17,8 @@ line
     ;
 
 defineStat
-    : WS? '#define' WS macroID restOfLine?;
+    : WS? '#define' WS macroID (WS restOfLine)?
+    ;
 
 undefStat
     : WS? '#undef' WS macroID WS?;
@@ -42,12 +43,13 @@ endifStat
 
 text: .*?;
 
-macroID: ID | OP;
+macroID: (ID | OP)+;
 
-restOfLine: (WS? (ID | OP) WS?)+;
+restOfLine: (WS? (ID | OP | DOUBLE_QUOTE)+ WS?)+;
 
 ID: [A-Za-z0-9_]+;
-OP: (~('a'..'z' | 'A'..'Z' | '0'..'9' | '\t' | '\r' | '\n' | ' ' | '_'))+;
+OP: (~('a'..'z' | 'A'..'Z' | '0'..'9' | '\t' | '\r' | '\n' | ' ' | '_' | '"'))+;
+DOUBLE_QUOTE: '"';
 
-NL          : '\r'? '\n';
+NL          : '\r'? '\n' | '\r';
 WS          : (' ' | '\t')+; // whitespace

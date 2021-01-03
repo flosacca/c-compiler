@@ -3,6 +3,7 @@ from antlr4 import FileStream, CommonTokenStream, ParseTreeWalker
 import sys
 import os
 import platform
+import re
 
 from _cpreprocess.CPreprocessorListener import CPreprocessorListener
 from _cpreprocess.CPreprocessorParser import CPreprocessorParser
@@ -128,12 +129,13 @@ class Listener(CPreprocessorListener):
         pass
 
     def exitDefineStat(self, ctx: CPreprocessorParser.DefineStatContext):
+        # WS? '#define' WS macroID restOfLine?
         if self._is_skip:
             return
         # 增加宏
         self._is_skip = True
         m = ctx.macroID().getText()
-        self._macro_define_list[m] = ''
+        self._macro_define_list[m] = ctx.restOfLine().getText() if ctx.restOfLine() is not None else ''
 
     def exitUndefStat(self, ctx: CPreprocessorParser.UndefStatContext):
         if self._is_skip:
@@ -186,6 +188,10 @@ class Listener(CPreprocessorListener):
     def if_stack(self):
         return self._if_stack
 
+    @property
+    def macro_define_list(self):
+        return self._macro_define_list
+
 
 def preprocess(filepath: str, include_dirs: List[str], macro_define_list: Optional[Dict[str, str]] = None) -> str:
     """
@@ -216,7 +222,40 @@ def preprocess(filepath: str, include_dirs: List[str], macro_define_list: Option
     walker.walk(listener, tree)
     if len(listener.if_stack) != 0:
         raise MacroError('缺少 #endif 宏', filepath, None)
-    return listener.buffer
+
+    output_data = listener.buffer
+    output_data = macro_replace(output_data, listener.macro_define_list)
+    output_data = remove_redundant_carriage(output_data)
+    return output_data
+
+
+def macro_replace(text: str, macro_list: Dict[str, str]) -> str:
+    """
+    替换宏.
+
+    :param text: 原来的文本
+    :type text: str
+    :param macro_list: 宏表
+    :type macro_list: Dict[str, str]
+    :return: 替换后的文本
+    :rtype: str
+    """
+    result = text
+    for (k, v) in macro_list.items():
+        result = result.replace(k, v if v is not None else '')
+    return result
+
+
+def remove_redundant_carriage(text: str) -> str:
+    """
+    去除多余的换行.
+
+    :param text: 文本
+    :type text: str
+    :return: 处理后的文本
+    :rtype: str
+    """
+    return re.sub('(\r?\n)+', '\n', text)
 
 
 if __name__ == '__main__':
