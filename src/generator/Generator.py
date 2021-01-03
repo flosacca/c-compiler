@@ -1512,9 +1512,6 @@ def generate(input_filename: str, output_filename: str):
         return ir.PointerType(self, addrspace)
     ir.Type.as_pointer = as_pointer
 
-    include_dirs = [os.getcwd(), './test']
-    precessed_text = preprocess(input_filename, include_dirs, None)
-
     # 加入宏处理
     include_dirs = [os.getcwd(), './test', './test/libc/include', './test/windows/include']
     macros = {'_WIN64': None}
