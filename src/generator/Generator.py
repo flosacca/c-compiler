@@ -8,7 +8,8 @@ from typing import Dict, List, Union, Optional, Tuple, Any, Type
 
 from generator.ErrorListener import SemanticError
 from generator.ErrorListener import SyntaxErrorListener
-from generator.SymbolTable import SymbolTable, Structure, TypedValue, const_value, ParameterList, DeclarationSpecifiers
+from generator.SymbolTable import SymbolTable, Structure, TypedValue, const_value, ParameterList, DeclarationSpecifiers, \
+    ElementNamedLiteralStructType
 from cparser.CCompilerLexer import CCompilerLexer
 from cparser.CCompilerParser import CCompilerParser
 from cparser.CCompilerVisitor import CCompilerVisitor
@@ -308,12 +309,12 @@ class Visitor(CCompilerVisitor):
             return pointer_declarator
         return declarator_func
 
-    def visitForDeclaration(self, ctx: CCompilerParser.DeclarationContext) -> None:
+    def visitForDeclaration(self, ctx: CCompilerParser.ForDeclarationContext) -> None:
         """
         声明.
 
         语法规则：
-            declaration
+            forDeclaration
                 :   declarationSpecifiers initDeclaratorList ';'
                 | 	declarationSpecifiers ';'
                 ;
@@ -325,7 +326,10 @@ class Visitor(CCompilerVisitor):
             None
         """
         specifiers: DeclarationSpecifiers = self.visit(ctx.declarationSpecifiers())
-        init_decl_list = self.visit(ctx.initDeclaratorList())
+        if ctx.initDeclaratorList():
+            init_decl_list = self.visit(ctx.initDeclaratorList())
+        else:
+            init_decl_list = []
         base_type = specifiers.get_type()
         if base_type is None:
             raise SemanticError("Unspecified declarator type", ctx)
@@ -337,8 +341,6 @@ class Visitor(CCompilerVisitor):
                 result = self.symbol_table.add_item(identifier, typ)
                 if not result.success:
                     raise SemanticError("Symbol redefined: " + identifier, ctx)
-                # todo: delete debug log
-                print("using type", identifier, "=", typ)
             else:
                 if self.is_global_scope():
                     if self.symbol_table.exist(identifier):
@@ -634,6 +636,77 @@ class Visitor(CCompilerVisitor):
             return
         raise SemanticError('impossible')
 
+    def visitStructSpecifier_1(self, ctx:CCompilerParser.StructSpecifier_1Context) -> ElementNamedLiteralStructType:
+        # structSpecifier : 'struct' Identifier? '{' structDeclarationList '}'
+        identifier_ctx = ctx.Identifier()
+        if identifier_ctx is not None:
+            identifier = f'struct {identifier_ctx.getText()}'
+            item = self.symbol_table.get_item(identifier)
+            if item is not None:
+                raise SemanticError("Symbol redefined: " + identifier)
+        else:
+            identifier = None
+        struct_member_list = self.visit(ctx.structDeclarationList())
+        type_list = [member[0] for member in struct_member_list]
+        name_list = [member[1] for member in struct_member_list]
+        struct_type = ElementNamedLiteralStructType(type_list, name_list)
+        if identifier:
+            self.symbol_table.add_item(identifier, struct_type)
+        return struct_type
+
+    def visitStructSpecifier_2(self, ctx: CCompilerParser.StructSpecifier_2Context) -> ElementNamedLiteralStructType:
+        # structSpecifier : 'struct' Identifier
+        identifier = f'struct {ctx.Identifier().getText()}'
+        item = self.symbol_table.get_item(identifier)
+        if item is None:
+            raise SemanticError("Undefined identifier: " + identifier)
+        return item
+
+    def visitStructDeclarationList(self, ctx: CCompilerParser.StructDeclarationListContext) -> List[Tuple[ir.Type, str]]:
+        """
+        语法规则：
+            structDeclarationList
+                :   structDeclaration
+                |   structDeclarationList structDeclaration
+                ;
+        """
+        if ctx.structDeclarationList():
+            prev_list = self.visit(ctx.structDeclarationList())
+        else:
+            prev_list = []
+        prev_list += self.visit(ctx.structDeclaration())
+        return prev_list
+
+    def visitStructDeclaration(self, ctx: CCompilerParser.StructDeclarationContext) -> List[Tuple[ir.Type, str]]:
+        # structDeclaration : declarationSpecifiers structDeclaratorList ';' ;
+        specifiers: DeclarationSpecifiers = self.visit(ctx.declarationSpecifiers())
+        decl_list = self.visit(ctx.structDeclaratorList())
+        base_type: ir.Type = specifiers.get_type()
+        if base_type is None:
+            raise SemanticError("Unspecified declarator type", ctx)
+        member_list = []
+        for decl in decl_list:
+            identifier, typ, parameter_list = decl(base_type)
+            if specifiers.is_typedef():
+                raise SemanticError("Illegal typedef here")
+            member_list.append((typ, identifier))
+        return member_list
+
+    def visitStructDeclaratorList(self, ctx:CCompilerParser.StructDeclaratorListContext):
+        """
+        语法规则:
+            structDeclaratorList
+                :   declarator
+                |   structDeclaratorList ',' declarator
+                ;
+        """
+        if ctx.structDeclaratorList():
+            prev_list = self.visit(ctx.structDeclaratorList())
+        else:
+            prev_list = []
+        prev_list.append(self.visit(ctx.declarator()))
+        return prev_list
+
     def load_lvalue(self, lvalue_ptr: TypedValue) -> Union[ir.Value, ir.NamedValue]:
         """
         从左值地址加载出一个值.
@@ -751,7 +824,9 @@ class Visitor(CCompilerVisitor):
         """
         builder = self.builder
         ir_value = self.load_lvalue(value)
-        if value.type in int_types:
+        if value.type == type:
+            return ir_value
+        elif value.type in int_types:
             if type in int_types:
                 if type.width <= value.type.width:
                     return builder.trunc(ir_value, type)
@@ -906,17 +981,17 @@ class Visitor(CCompilerVisitor):
         if not v1.lvalue_ptr:
             raise SemanticError('Postfix Expression(#2) needs lvalue.', ctx=ctx)
         rvalue: ir.NamedValue = self.load_lvalue(v1)
-        if not isinstance(rvalue.type, ir.types.LiteralStructType):
+        if not isinstance(rvalue.type, ElementNamedLiteralStructType):
             raise SemanticError("Postfix expression(#4) is not literal struct.", ctx=ctx)
         member_name = ctx.Identifier().getText()
-        ls_type: ir.LiteralStructType = rvalue.type
+        ls_type: ElementNamedLiteralStructType = rvalue.type
         try:
-            member_index = ls_type.elements.index(member_name)
+            member_index = ls_type.index(member_name)
             member_type = ls_type.elements[member_index]
         except ValueError:
             raise SemanticError("Postfix expression(#4) has not such attribute.", ctx=ctx)
         # 获得地址
-        result = builder.gep(v1.ir_value, [int32_zero, member_index], inbounds=False)
+        result = builder.gep(v1.ir_value, [int32_zero, ir.Constant(int32, member_index)], inbounds=False)
         return TypedValue(result, member_type, constant=False, name=None, lvalue_ptr=True)
 
     def visitPostfixExpression_5(self, ctx: CCompilerParser.PostfixExpression_5Context) -> TypedValue:
@@ -927,16 +1002,16 @@ class Visitor(CCompilerVisitor):
         if not isinstance(rvalue.type, ir.types.PointerType):
             raise SemanticError("Postfix expression(#5) is not pointer.", ctx=ctx)
         # 转到结构体类型
-        pointee_type = rvalue.pointee
+        pointee_type = v1.type.pointee
         member_name = ctx.Identifier().getText()
-        ls_type: ir.LiteralStructType = pointee_type
+        ls_type: ElementNamedLiteralStructType = pointee_type
         try:
-            member_index = ls_type.elements.index(member_name)
+            member_index = ls_type.index(member_name)
             member_type = ls_type.elements[member_index]
         except ValueError:
             raise SemanticError("Postfix expression(#5) has not such attribute.", ctx=ctx)
         # 获得地址
-        result = builder.gep(rvalue, [int32_zero, member_index], inbounds=False)
+        result = builder.gep(rvalue, [int32_zero, ir.Constant(int32, member_index)], inbounds=False)
         return TypedValue(result, member_type, constant=False, name=None, lvalue_ptr=True)
 
     def visitPostfixExpression_6(self, ctx: CCompilerParser.PostfixExpression_6Context) -> TypedValue:
