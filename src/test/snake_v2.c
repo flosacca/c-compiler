@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <windows.h>
-#include <conio.h>
+//#include <conio.h>
 
 // Sercan BAYRAMBEY  https://github.com/sercanbayrambey/C-Snake-Game
 

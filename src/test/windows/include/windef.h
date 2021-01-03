@@ -8,6 +8,9 @@
 // for now, ignore unsigned
 #define unsigned
 
+#define VOID void
+#define CONST const
+
 typedef unsigned long       DWORD;
 typedef int                 BOOL;
 typedef unsigned char       BYTE;

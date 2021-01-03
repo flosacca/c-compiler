@@ -5,4 +5,6 @@
 #include <winbase.h>
 #include <winnt.h>
 
+#include <winmisc.h>
+
 #endif

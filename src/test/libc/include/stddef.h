@@ -3,8 +3,5 @@
 
 #include <corecrt.h>
 
-// ignore unsigned
-#define unsigned
-
 
 #endif

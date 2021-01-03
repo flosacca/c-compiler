@@ -165,5 +165,8 @@ cython_debug/
 *.[ch]
 !**/test/**/*.[ch]
 
+# NO executable
+*.exe
+
 # Makefile
 [Mm]akefile
