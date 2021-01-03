@@ -1,5 +1,5 @@
 from antlr4 import *
-from llvmlite import ir
+from llvmlite import ir, binding
 
 import re
 import os
@@ -42,7 +42,11 @@ class Visitor(CCompilerVisitor):
         self.module: ir.Module = ir.Module()
         self.module.triple = 'x86_64-pc-linux-gnu'  # llvm.Target.from_default_triple()
         # llvm.create_mcjit_compiler(backing_mod, target_machine)
-        self.module.data_layout = 'e-m:e-i64:64-f80:128-n8:16:32:64-S128'
+        self.data_layout = 'e-m:e-i64:64-f80:128-n8:16:32:64-S128'
+        self.module.data_layout = self.data_layout
+
+        # llvm data layout
+        self.target_data = binding.create_target_data(self.data_layout)
 
         # 待生成的 llvm 语句块
         self.builder: ir.IRBuilder
@@ -193,8 +197,8 @@ class Visitor(CCompilerVisitor):
         declarator_func = self.visit(ctx.directDeclarator())
 
         def create_arr_ret(typ: ir.Type, specifiers):
-            id1, typ1, pl = declarator_func(typ, specifiers)
-            return id1, ir.ArrayType(typ1, arr_len), pl
+            typ1 = ir.ArrayType(typ, arr_len)
+            return declarator_func(typ1, specifiers)
 
         return create_arr_ret
 
@@ -327,9 +331,10 @@ class Visitor(CCompilerVisitor):
             pointer = self.visit(ctx.pointer())
 
             def pointer_declarator(typ: ir.Type, specifier):
-                identifier1, typ1, parameter_list1 = declarator_func(typ, specifier)
+                typ1 = typ
                 for _ in pointer:
                     typ1 = typ1.as_pointer()
+                identifier1, typ1, parameter_list1 = declarator_func(typ1, specifier)
                 return identifier1, typ1, parameter_list1
             return pointer_declarator
         return declarator_func
@@ -785,9 +790,10 @@ class Visitor(CCompilerVisitor):
             return self.string_constants[str_value]
         str_bytes = bytearray(str_value + "\0", "utf-8")
         variable_name = ".str" + str(len(self.string_constants))
-        ir_value = ir.GlobalVariable(self.module, ir.ArrayType(int8, len(str_bytes)), variable_name)
+        arr_type = ir.ArrayType(int8, len(str_bytes))
+        ir_value = ir.GlobalVariable(self.module, arr_type, variable_name)
         ir_value.initializer = ir.Constant(ir.ArrayType(int8, len(str_bytes)), str_bytes)
-        typed_value = TypedValue(ir_value, typ=ir_value.type, constant=True)
+        typed_value = TypedValue(ir_value, typ=arr_type, constant=True)
         self.string_constants[str_value] = typed_value
         return typed_value
 
@@ -841,6 +847,15 @@ class Visitor(CCompilerVisitor):
             return new_v1, new_v2, new_type
 
         raise SemanticError('Bit extend error.', ctx=ctx)
+
+    def decay(self, value: TypedValue, ctx=None) -> TypedValue:
+        # decay
+        if not isinstance(value.type, ir.ArrayType):
+            if value.type.is_pointer:
+                return value
+            raise SemanticError("Cannot decay a non-array type.", ctx)
+        pointer = self.builder.gep(value.ir_value, [int32_zero, int32_zero], inbounds=False)
+        return TypedValue(ir_value=pointer, typ=value.type.element.as_pointer(), constant=False, lvalue_ptr=False)
 
     def convert_type(self, value: TypedValue, type: ir.Type, ctx=None) -> ir.Value:
         """
@@ -952,8 +967,6 @@ class Visitor(CCompilerVisitor):
         # postfixExpression '[' expression ']'
         v1: TypedValue = self.visit(ctx.getChild(0))
         builder = self.builder
-        if not v1.lvalue_ptr:
-            raise SemanticError('Postfix Expression(#2) needs lvalue.', ctx=ctx)
         is_pointer = isinstance(v1.type, ir.types.PointerType)
         is_array = isinstance(v1.type, ir.types.ArrayType)
         if not is_array and not is_pointer:
@@ -1142,13 +1155,19 @@ class Visitor(CCompilerVisitor):
 
     def visitUnaryExpression_5(self, ctx: CCompilerParser.UnaryExpression_5Context) -> TypedValue:
         # 'sizeof' unaryExpression
-        # TODO 不知道返回什么类型
-        raise SemanticError('Not implemented yet.', ctx=ctx)
+        # TODO 在不实际计算 expression 值的情况下完成
+        expression = self.visit(ctx.unaryExpression())
+        if isinstance(expression, ir.Type):
+            size = expression.get_abi_size(self.target_data)
+        else:
+            expression: TypedValue
+            size = expression.type.get_abi_size(self.target_data)
+        return const_value(ir.Constant(int64, size))
 
     def visitUnaryExpression_6(self, ctx: CCompilerParser.UnaryExpression_6Context) -> TypedValue:
         # 'sizeof' '(' typeName ')'
-        # TODO 不知道返回什么类型
-        raise SemanticError('Not implemented yet.', ctx=ctx)
+        typ: ir.Type = self.visit(ctx.typeName())
+        return const_value(ir.Constant(int64, typ.get_abi_size(self.target_data)))
 
     def visitCastExpression_1(self, ctx: CCompilerParser.CastExpression_1Context) -> TypedValue:
         # '(' typeName ')' castExpression
@@ -1207,14 +1226,25 @@ class Visitor(CCompilerVisitor):
         # additiveExpression '+' multiplicativeExpression
         v1: TypedValue = self.visit(ctx.additiveExpression())
         v2: TypedValue = self.visit(ctx.multiplicativeExpression())
+        if isinstance(v1.type, ir.ArrayType):
+            v1 = self.decay(v1)
+        if isinstance(v2.type, ir.ArrayType):
+            v2 = self.decay(v2)
         rvalue1 = self.load_lvalue(v1)
         rvalue2 = self.load_lvalue(v2)
-        new_rvalue1, new_rvalue2, new_type = self.bit_extend(rvalue1, rvalue2, ctx)
-        builder = self.builder
-        if new_type == double:
-            result = builder.fadd(new_rvalue1, new_rvalue2)
+        if v2.type.is_pointer and v1.type in int_types:
+            result = self.builder.gep(rvalue2, [rvalue1], inbounds=False)
+            new_type = v2.type
+        elif v1.type.is_pointer and v2.type in int_types:
+            result = self.builder.gep(rvalue1, [rvalue2], inbounds=False)
+            new_type = v1.type
         else:
-            result = builder.add(new_rvalue1, new_rvalue2)
+            new_rvalue1, new_rvalue2, new_type = self.bit_extend(rvalue1, rvalue2, ctx)
+            builder = self.builder
+            if new_type == double:
+                result = builder.fadd(new_rvalue1, new_rvalue2)
+            else:
+                result = builder.add(new_rvalue1, new_rvalue2)
         return TypedValue(result, new_type, constant=False, name=None, lvalue_ptr=False)
 
     def visitAdditiveExpression_3(self, ctx: CCompilerParser.AdditiveExpression_3Context):
@@ -1397,20 +1427,29 @@ class Visitor(CCompilerVisitor):
         self.builder.cbranch(cond, block_true, block_false)
 
         self.builder = ir.IRBuilder(block_true)
-        value_true = self.visit(ctx.expression()).ir_value
+        typed_value_true = self.visit(ctx.expression())
+        if isinstance(typed_value_true.type, ir.ArrayType):
+            typed_value_true = self.decay(typed_value_true)
+        value_true = typed_value_true.ir_value
         self.builder.branch(block_end)
         block_true = self.builder.basic_block
 
         self.builder = ir.IRBuilder(block_false)
-        value_false = self.visit(ctx.conditionalExpression()).ir_value
+        typed_value_false = self.visit(ctx.conditionalExpression())
+        if isinstance(typed_value_false.type, ir.ArrayType):
+            typed_value_false = self.decay(typed_value_false)
+        value_false = typed_value_false.ir_value
         self.builder.branch(block_end)
         block_false = self.builder.basic_block
 
+        if typed_value_true.type != typed_value_false.type:
+            raise SemanticError("Type not identical.", ctx)
+
         self.builder = ir.IRBuilder(block_end)
-        result = self.builder.phi(value_true.type)
+        result = self.builder.phi(typed_value_true.type)
         result.add_incoming(value_true, block_true)
         result.add_incoming(value_false, block_false)
-        return TypedValue(result, int1, constant=False, name=None, lvalue_ptr=False)
+        return TypedValue(result, typed_value_true.type, constant=False, name=None, lvalue_ptr=False)
 
     def visitAssignmentExpression_2(self, ctx: CCompilerParser.AssignmentExpression_2Context):
         # unaryExpression assignmentOperator assignmentExpression
