@@ -44,6 +44,10 @@ class Visitor(CCompilerVisitor):
         # 待生成的 llvm 语句块
         self.builder: ir.IRBuilder
 
+        # 用于控制语句的标号
+        self.start_blocks: ir.BasicBlock = []
+        self.end_blocks: ir.BasicBlock = []
+
         # 函数列表 Dict[名称, 是否有定义]
         self.functions: Dict[str, ir.Function] = dict()
 
@@ -538,25 +542,41 @@ class Visitor(CCompilerVisitor):
 
     def visitIterationStatement(self, ctx: CCompilerParser.SelectionStatementContext) -> None:
         kw = ctx.getChild(0).getText()
-        if kw == 'while':
-            # 'while' '(' expression ')' statement
+        if kw == 'while' or kw == 'do':
+            loop_block = self.builder.append_basic_block()
             start_block = self.builder.append_basic_block()
-            cond_block = self.builder.append_basic_block()
             end_block = self.builder.append_basic_block()
-            self.builder.branch(cond_block)
-            self.builder = ir.IRBuilder(cond_block)
-            cond = self.visit(ctx.expression())
-            self.builder.cbranch(self.to_boolean(cond).ir_value, start_block, end_block)
+            self.start_blocks.append(start_block)
+            self.end_blocks.append(end_block)
+            if kw == 'while':
+                self.builder.branch(start_block)
+            elif kw == 'do':
+                self.builder.branch(loop_block)
             self.builder = ir.IRBuilder(start_block)
+            cond = self.visit(ctx.expression())
+            self.builder.cbranch(self.to_boolean(cond).ir_value, loop_block, end_block)
+            self.builder = ir.IRBuilder(loop_block)
             self.visit(ctx.statement())
             if not self.builder.basic_block.is_terminated:
-                self.builder.branch(cond_block)
+                self.builder.branch(start_block)
             self.builder = ir.IRBuilder(end_block)
-        else:
-            raise SemanticError("Not implemented", ctx)
+            self.start_blocks.pop()
+            self.end_blocks.pop()
+            return
+        raise SemanticError("Not implemented", ctx)
 
     def visitJumpStatement(self, ctx: CCompilerParser.JumpStatementContext) -> None:
         kw = ctx.getChild(0).getText()
+        if kw == 'continue':
+            if not self.start_blocks:
+                raise SemanticError('Nothing to continue', ctx)
+            self.builder.branch(self.start_blocks[-1])
+            return
+        if kw == 'break':
+            if not self.end_blocks:
+                raise SemanticError('Nothing to break', ctx)
+            self.builder.branch(self.end_blocks[-1])
+            return
         if kw == 'return':
             ret_value_ctx = ctx.expression()
             ret_value = None
@@ -566,8 +586,8 @@ class Visitor(CCompilerVisitor):
                 builder.ret(self.load_lvalue(ret_value))
             else:
                 builder.ret_void()
-        else:
-            raise SemanticError("Not implemented", ctx)
+            return
+        raise SemanticError('impossible')
 
     def load_lvalue(self, lvalue_ptr: TypedValue) -> Union[ir.Value, ir.NamedValue]:
         """
