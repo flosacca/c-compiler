@@ -87,7 +87,7 @@ class Visitor(CCompilerVisitor):
 
         语法规则：
             functionDefinition
-                :   typeSpecifier declarator compoundStatement
+                :   declarationSpecifiers declarator compoundStatement
                 ;
 
         Args:
@@ -96,16 +96,22 @@ class Visitor(CCompilerVisitor):
         Returns:
             None
         """
-        ret_type: ir.Type = self.visit(ctx.typeSpecifier())
+        specifiers: DeclarationSpecifiers = self.visit(ctx.declarationSpecifiers())
+        ret_type: ir.Type = specifiers.get_type()
         if ret_type is None:
-            raise SemanticError("返回类型未指定", ctx)
+            ret_type = int32
+            print(f"Return type not specified, assuming int.")
         declarator_func = self.visit(ctx.declarator())
-        function_name, function_type, parameter_list = declarator_func(ret_type)
+        function_name, function_type, parameter_list = declarator_func(ret_type, specifiers)
         parameter_list: ParameterList
 
         # 判断重定义，存储函数
         if function_name in self.functions:
             llvm_function = self.functions[function_name]
+            if parameter_list.calling_convention and parameter_list.calling_convention != llvm_function.calling_convention:
+                raise SemanticError("Calling convention not identical: "
+                                    f"previous {llvm_function.calling_convention} "
+                                    f"new {parameter_list.calling_convention}")
             if len(llvm_function.blocks) > 0:
                 raise SemanticError(ctx=ctx, msg='函数重定义: ' + function_name)
         else:
@@ -165,7 +171,7 @@ class Visitor(CCompilerVisitor):
         directDeclarator : Identifier
         """
         identifier = ctx.getText()
-        return lambda typ: (identifier, typ, None)
+        return lambda typ, _: (identifier, typ, None)
 
     def visitDirectDeclarator_2(self, ctx: CCompilerParser.DirectDeclarator_2Context):
         """
@@ -186,7 +192,7 @@ class Visitor(CCompilerVisitor):
                 raise SemanticError("数组的长度必须是常量表达式", ctx)
         declarator_func = self.visit(ctx.directDeclarator())
 
-        def create_arr_ret(typ: ir.Type):
+        def create_arr_ret(typ: ir.Type, _):
             id1, typ1, pl = declarator_func(typ)
             return id1, ir.ArrayType(typ1, arr_len), pl
 
@@ -199,9 +205,14 @@ class Visitor(CCompilerVisitor):
         declarator_func = self.visit(ctx.directDeclarator())
         parameter_list = self.visit(ctx.parameterTypeList())
 
-        def create_func_ret(typ: ir.Type):
+        def create_func_ret(typ: ir.Type, specifiers: DeclarationSpecifiers):
             typ1 = ir.FunctionType(typ, parameter_list.arg_list, parameter_list.var_arg)
-            identifier2, typ2, _ = declarator_func(typ1)
+            identifier2, typ2, _ = declarator_func(typ1, specifiers)
+            for func_spec in specifiers.get_function_specifiers():
+                if func_spec == "__cdcel":
+                    parameter_list.calling_convention = "ccc"
+                elif func_spec == "__stdcall":
+                    parameter_list.calling_convention = "cc 65"
             return identifier2, typ2, parameter_list
         return create_func_ret
 
@@ -245,7 +256,7 @@ class Visitor(CCompilerVisitor):
         if base_type is None:
             raise SemanticError("未指定类型", ctx)
         declarator_func = self.visit(ctx.declarator())
-        identifier, typ, parameter_list = declarator_func(base_type)
+        identifier, typ, parameter_list = declarator_func(base_type, specifiers)
         if isinstance(typ, ir.ArrayType):
             # decay
             typ: ir.ArrayType
@@ -280,6 +291,7 @@ class Visitor(CCompilerVisitor):
                 :   storageClassSpecifier
                 |   typeSpecifier
                 |   typeQualifier
+                |   functionSpecifier
                 ;
         """
         if ctx.storageClassSpecifier():
@@ -288,6 +300,8 @@ class Visitor(CCompilerVisitor):
             return "type", self.visit(ctx.typeSpecifier())
         if ctx.typeQualifier():
             return "type_qualifier", self.visit(ctx.typeQualifier())
+        if ctx.functionSpecifier():
+            return "function_specifier", self.visit(ctx.functionSpecifier())
         raise SemanticError('impossible')
 
     def visitDeclarator(self, ctx: CCompilerParser.DeclaratorContext):
@@ -312,8 +326,8 @@ class Visitor(CCompilerVisitor):
         if ctx.pointer():
             pointer = self.visit(ctx.pointer())
 
-            def pointer_declarator(typ: ir.Type):
-                identifier1, typ1, parameter_list1 = declarator_func(typ)
+            def pointer_declarator(typ: ir.Type, specifier):
+                identifier1, typ1, parameter_list1 = declarator_func(typ, specifier)
                 for _ in pointer:
                     typ1 = typ1.as_pointer()
                 return identifier1, typ1, parameter_list1
@@ -345,7 +359,7 @@ class Visitor(CCompilerVisitor):
         if base_type is None:
             raise SemanticError("Unspecified declarator type", ctx)
         for decl, initializer in init_decl_list:
-            identifier, typ, parameter_list = decl(base_type)
+            identifier, typ, parameter_list = decl(base_type, specifiers)
             if specifiers.is_typedef():
                 if initializer is not None:
                     raise SemanticError("Illegal initializer (only variables can be initialized)", ctx)

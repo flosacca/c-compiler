@@ -21,6 +21,9 @@ class DeclarationSpecifiers:
     def append_storage_class_specifier(self, qualifier: str):
         self.specifiers.append(("storage", qualifier))
 
+    def append_function_specifier(self, specifier: str):
+        self.specifiers.append(("function_specifier", specifier))
+
     def append(self, typ: str, val: Union[str, ir.Type]):
         if typ == "type":
             self.append_type_specifier(val)
@@ -28,6 +31,11 @@ class DeclarationSpecifiers:
             self.append_type_qualifier(val)
         if typ == "storage":
             self.append_storage_class_specifier(val)
+        if typ == "function_specifier":
+            self.append_function_specifier(val)
+
+    def get_function_specifiers(self):
+        return map(lambda x: x[1], filter(lambda x: x[0] == "function_specifier", self.specifiers))
 
     def get_type(self):
         for (typ, val) in self.specifiers:
@@ -44,10 +52,11 @@ class DeclarationSpecifiers:
 
 class ParameterList:
 
-    def __init__(self, parameters: List[Tuple[ir.Type, Optional[str]]], var_arg: bool):
+    def __init__(self, parameters: List[Tuple[ir.Type, Optional[str]]], var_arg: bool, calling_convention: str = ''):
         self.parameters = parameters
         self.var_arg = var_arg
         self.arg_list = [param[0] for param in self.parameters]
+        self.calling_convention = calling_convention
 
     def __getitem__(self, item: int):
         return self.parameters[item]
