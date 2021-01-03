@@ -65,6 +65,12 @@ class Visitor(CCompilerVisitor):
 
         # 符号表
         self.symbol_table: SymbolTable = SymbolTable()
+        self.symbol_table.add_item("int", int32)
+        self.symbol_table.add_item("long", int32)
+        self.symbol_table.add_item("double", double)
+        self.symbol_table.add_item("char", int8)
+        self.symbol_table.add_item("void", void)
+        self.symbol_table.add_item("bool", int1)
 
         # 字符串常量表
         self.string_constants: Dict[str, TypedValue] = {}
@@ -74,45 +80,6 @@ class Visitor(CCompilerVisitor):
         当前是否在全局作用域下.
         """
         return self.symbol_table.is_global()
-
-    def visitProg(self, ctx: CCompilerParser.ProgContext) -> None:
-        """
-        代码主文件.
-
-        语法规则：
-            prog : translationUnit* EOF;
-
-        Args:
-            ctx (CCompilerParser.ProgContext):
-
-        Returns:
-            None
-        """
-        # initialize symbol table
-        self.symbol_table.add_item("int", int32)
-        self.symbol_table.add_item("long", int32)
-        self.symbol_table.add_item("double", double)
-        self.symbol_table.add_item("char", int8)
-        self.symbol_table.add_item("void", void)
-        self.symbol_table.add_item("bool", int1)
-
-        for i in range(ctx.getChildCount()):
-            self.visit(ctx.getChild(i))
-
-    def visitTranslationUnit(self, ctx: CCompilerParser.TranslationUnitContext) -> None:
-        """
-        翻译单元.
-
-        语法规则：
-            translationUnit : functionDefinition | declaration | ';' ;
-
-        Args:
-            ctx (CCompilerParser.TranslationUnitContext):
-
-        Returns:
-            None
-        """
-        self.visit(ctx.getChild(0))
 
     def visitFunctionDefinition(self, ctx: CCompilerParser.FunctionDefinitionContext) -> None:
         """
@@ -731,26 +698,18 @@ class Visitor(CCompilerVisitor):
         else:
             raise SemanticError('Not supported type conversion.', ctx=ctx)
 
-    def visitStringLiteral(self, ctx: CCompilerParser.StringLiteralContext) -> str:
-        """
-        处理字符串字面值
-        """
-        return ctx.getText()[1:-1].encode('utf-8').decode('unicode_escape')
-
     def visitConstant(self, ctx: CCompilerParser.ConstantContext) -> TypedValue:
-        # This rule has only lexical elements. In this case, getAltNumber()
-        # always returns 1 so we cannot use it.
+        text = ctx.getText()
         if ctx.IntegerConstant():
-            def parseInt(s):
-                if re.fullmatch('0[0-7]*', s):
-                    return int(s, 8)
-                return int(s, 0)
-
-            return const_value(ir.Constant(int32, parseInt(ctx.getText())))
+            if re.fullmatch('0[0-7]*', text):
+                value = int(text, 8)
+            else:
+                value = int(text, 0)
+            return const_value(ir.Constant(int32, value))
         if ctx.FloatingConstant():
-            return const_value(ir.Constant(double, float(ctx.getText())))
+            return const_value(ir.Constant(double, float(text)))
         if ctx.CharacterConstant():
-            return const_value(ir.Constant(int8, ord(ctx.getText()[1])))
+            return const_value(ir.Constant(int8, ord(text[1])))
         raise SemanticError('impossible')
 
     def visitPrimaryExpression(self, ctx: CCompilerParser.PrimaryExpressionContext) -> TypedValue:
@@ -763,11 +722,10 @@ class Visitor(CCompilerVisitor):
             if item is None:
                 raise SemanticError("Undefined identifier: " + identifier)
             return item
-        if ctx.stringLiteral():
-            count = ctx.getChildCount()
+        if ctx.StringLiteral():
             str_result = ""
-            for i in range(count):
-                str_result += self.visit(ctx.getChild(i))
+            for childCtx in ctx.StringLiteral():
+                str_result += childCtx.getText()[1:-1].encode('utf-8').decode('unicode_escape')
             return self.str_constant(str_result)
         if ctx.constant():
             return self.visit(ctx.constant())
@@ -1302,7 +1260,7 @@ def generate(input_filename: str, output_filename: str):
     errorListener = SyntaxErrorListener()
     parser.addErrorListener(errorListener)
 
-    tree = parser.prog()
+    tree = parser.compilationUnit()
     v = Visitor()
     # v.builders.append(None)
     v.visit(tree)
