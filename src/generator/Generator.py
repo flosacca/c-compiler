@@ -666,14 +666,13 @@ class Visitor(CCompilerVisitor):
         if kw == 'return':
             ret_value_ctx = ctx.expression()
             ret_value = None
-            builder = self.builder
             if ret_value_ctx is not None:
                 ret_value = self.convert_type(self.visit(ret_value_ctx),
                                               self.current_function.function_type.return_type,
                                               ctx)
-                builder.ret(ret_value)
+                self.builder.ret(ret_value)
             else:
-                builder.ret_void()
+                self.builder.ret_void()
             return
         raise SemanticError('impossible')
 
@@ -966,7 +965,6 @@ class Visitor(CCompilerVisitor):
     def visitPostfixExpression_2(self, ctx: CCompilerParser.PostfixExpression_2Context) -> TypedValue:
         # postfixExpression '[' expression ']'
         v1: TypedValue = self.visit(ctx.getChild(0))
-        builder = self.builder
         is_pointer = isinstance(v1.type, ir.types.PointerType)
         is_array = isinstance(v1.type, ir.types.ArrayType)
         if not is_array and not is_pointer:
@@ -978,10 +976,10 @@ class Visitor(CCompilerVisitor):
         offset = self.load_lvalue(v2)
         result: ir.Instruction
         if is_pointer:
-            result = builder.gep(base_ptr, [offset], inbounds=False)
+            result = self.builder.gep(base_ptr, [offset], inbounds=False)
             result_type = v1.type.pointee
         elif is_array:
-            result = builder.gep(base_ptr, [int32_zero, offset], inbounds=True)
+            result = self.builder.gep(base_ptr, [int32_zero, offset], inbounds=True)
             result_type = v1.type.element
         else:
             raise SemanticError("Postfix expression(#2) is not a array or pointer.", ctx=ctx)
@@ -1025,7 +1023,6 @@ class Visitor(CCompilerVisitor):
     def visitPostfixExpression_4(self, ctx: CCompilerParser.PostfixExpression_4Context) -> TypedValue:
         # postfixExpression '.' Identifier
         v1: TypedValue = self.visit(ctx.getChild(0))
-        builder = self.builder
         if not v1.lvalue_ptr:
             raise SemanticError('Postfix Expression(#2) needs lvalue.', ctx=ctx)
         rvalue: ir.NamedValue = self.load_lvalue(v1)
@@ -1039,13 +1036,12 @@ class Visitor(CCompilerVisitor):
         except ValueError:
             raise SemanticError("Postfix expression(#4) has not such attribute.", ctx=ctx)
         # 获得地址
-        result = builder.gep(v1.ir_value, [int32_zero, ir.Constant(int32, member_index)], inbounds=False)
+        result = self.builder.gep(v1.ir_value, [int32_zero, ir.Constant(int32, member_index)], inbounds=False)
         return TypedValue(result, member_type, constant=False, name=None, lvalue_ptr=True)
 
     def visitPostfixExpression_5(self, ctx: CCompilerParser.PostfixExpression_5Context) -> TypedValue:
         # postfixExpression '->' Identifier
         v1: TypedValue = self.visit(ctx.getChild(0))
-        builder = self.builder
         rvalue: ir.NamedValue = self.load_lvalue(v1)  # 这里事实上获得一个指针
         if not isinstance(rvalue.type, ir.types.PointerType):
             raise SemanticError("Postfix expression(#5) is not pointer.", ctx=ctx)
@@ -1059,24 +1055,28 @@ class Visitor(CCompilerVisitor):
         except ValueError:
             raise SemanticError("Postfix expression(#5) has not such attribute.", ctx=ctx)
         # 获得地址
-        result = builder.gep(rvalue, [int32_zero, ir.Constant(int32, member_index)], inbounds=False)
+        result = self.builder.gep(rvalue, [int32_zero, ir.Constant(int32, member_index)], inbounds=False)
         return TypedValue(result, member_type, constant=False, name=None, lvalue_ptr=True)
 
     def visitPostfixExpression_6(self, ctx: CCompilerParser.PostfixExpression_6Context) -> TypedValue:
         # postfixExpression '++'
         v1: TypedValue = self.visit(ctx.getChild(0))
-        builder = self.builder
         rvalue = self.load_lvalue(v1)
-        result = builder.add(rvalue, ir.Constant(v1.type, 1))
+        if v1.type.is_pointer:
+            result = self.builder.gep(rvalue, [ir.Constant(int64, 1)], inbounds=False)
+        else:
+            result = self.builder.add(rvalue, ir.Constant(v1.type, 1))
         self.store_lvalue(result, v1)
         return TypedValue(rvalue, v1.type, constant=False, name=None, lvalue_ptr=False)
 
     def visitPostfixExpression_7(self, ctx: CCompilerParser.PostfixExpression_7Context) -> TypedValue:
         # postfixExpression '--'
         v1: TypedValue = self.visit(ctx.getChild(0))
-        builder = self.builder
         rvalue = self.load_lvalue(v1)
-        result = builder.sub(rvalue, ir.Constant(v1.type, 1))
+        if v1.type.is_pointer:
+            result = self.builder.gep(rvalue, [ir.Constant(int64, -1)], inbounds=False)
+        else:
+            result = self.builder.sub(rvalue, ir.Constant(v1.type, 1))
         self.store_lvalue(result, v1)
         return TypedValue(rvalue, v1.type, constant=False, name=None, lvalue_ptr=False)
 
@@ -1104,18 +1104,22 @@ class Visitor(CCompilerVisitor):
     def visitUnaryExpression_2(self, ctx: CCompilerParser.UnaryExpression_2Context) -> TypedValue:
         # '++' unaryExpression
         v1: TypedValue = self.visit(ctx.unaryExpression())
-        builder = self.builder
         rvalue = self.load_lvalue(v1)
-        result = builder.add(rvalue, ir.Constant(v1.type, 1))
+        if v1.type.is_pointer:
+            result = self.builder.gep(rvalue, [ir.Constant(int64, 1)], inbounds=False)
+        else:
+            result = self.builder.add(rvalue, ir.Constant(v1.type, 1))
         self.store_lvalue(result, v1)
         return v1
 
     def visitUnaryExpression_3(self, ctx: CCompilerParser.UnaryExpression_3Context) -> TypedValue:
         # '--' unaryExpression
         v1 = self.visit(ctx.unaryExpression())
-        builder = self.builder
         rvalue = self.load_lvalue(v1)
-        result = builder.sub(rvalue, ir.Constant(v1.type, 1))
+        if v1.type.is_pointer:
+            result = self.builder.gep(rvalue, [ir.Constant(int64, -1)], inbounds=False)
+        else:
+            result = self.builder.sub(rvalue, ir.Constant(v1.type, 1))
         self.store_lvalue(result, v1)
         return v1
 
@@ -1123,7 +1127,6 @@ class Visitor(CCompilerVisitor):
         # unaryOperator castExpression
         op: str = ctx.unaryOperator().getText()
         v2: TypedValue = self.visit(ctx.castExpression())
-        builder = self.builder
         # '&' | '*' | '+' | '-' | '~' | '!'
         if op == '&':
             # 必须对左值取地址
@@ -1144,11 +1147,11 @@ class Visitor(CCompilerVisitor):
             return self.visit(ctx.castExpression())
         elif op == '-':
             rvalue = self.load_lvalue(v2)
-            result: ir.Instruction = builder.neg(rvalue)
+            result: ir.Instruction = self.builder.neg(rvalue)
             return TypedValue(result, v2.type, constant=False, name=None, lvalue_ptr=False)
         elif op == '~':
             rvalue = self.load_lvalue(v2)
-            result: ir.Instruction = builder.not_(rvalue)
+            result: ir.Instruction = self.builder.not_(rvalue)
             return TypedValue(result, v2.type, constant=False, name=None, lvalue_ptr=False)
         elif op == '!':
             return self.typed_bool(v2, negation=True)
@@ -1251,14 +1254,25 @@ class Visitor(CCompilerVisitor):
         # additiveExpression '-' multiplicativeExpression
         v1: TypedValue = self.visit(ctx.additiveExpression())
         v2: TypedValue = self.visit(ctx.multiplicativeExpression())
+        if isinstance(v1.type, ir.ArrayType):
+            v1 = self.decay(v1)
+        if isinstance(v2.type, ir.ArrayType):
+            v2 = self.decay(v2)
         rvalue1 = self.load_lvalue(v1)
         rvalue2 = self.load_lvalue(v2)
-        new_rvalue1, new_rvalue2, new_type = self.bit_extend(rvalue1, rvalue2, ctx)
-        builder = self.builder
-        if new_type == double:
-            result = builder.fsub(new_rvalue1, new_rvalue2)
+        if v2.type.is_pointer and v1.type in int_types:
+            result = self.builder.gep(rvalue2, [self.builder.neg(rvalue1)], inbounds=False)
+            new_type = v2.type
+        elif v1.type.is_pointer and v2.type in int_types:
+            result = self.builder.gep(rvalue1, [self.builder.neg(rvalue2)], inbounds=False)
+            new_type = v1.type
         else:
-            result = builder.sub(new_rvalue1, new_rvalue2)
+            new_rvalue1, new_rvalue2, new_type = self.bit_extend(rvalue1, rvalue2, ctx)
+            builder = self.builder
+            if new_type == double:
+                result = builder.fsub(new_rvalue1, new_rvalue2)
+            else:
+                result = builder.sub(new_rvalue1, new_rvalue2)
         return TypedValue(result, new_type, constant=False, name=None, lvalue_ptr=False)
 
     def visitShiftExpression_2(self, ctx: CCompilerParser.ShiftExpression_2Context):
@@ -1456,12 +1470,12 @@ class Visitor(CCompilerVisitor):
         v1: TypedValue = self.visit(ctx.unaryExpression())
         op: str = ctx.assignmentOperator().getText()
         v3: TypedValue = self.visit(ctx.assignmentExpression())
-        builder = self.builder
         # lhs 必须为左值
         if not v1.lvalue_ptr:
             raise SemanticError('Assignment needs a lvalue at left.', ctx=ctx)
         rvalue1 = self.load_lvalue(v1)
         rvalue3 = self.load_lvalue(v3)
+        builder = self.builder
         # '=' | '*=' | '/=' | '%=' | '+=' | '-=' | '<<=' | '>>=' | '&=' | '^=' | '|='
         if op == '=':
             result = self.convert_type(v3, v1.type, ctx=ctx)
