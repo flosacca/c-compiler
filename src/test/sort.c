@@ -32,7 +32,7 @@ int a[N];
 
 int main() {
     int n = 0;
-    while (~scanf("%d", &a[n]))
+    while (~scanf("%d", a + n))
         ++n;
     quick_sort(a, n);
     for (int i = 0; i < n; ++i)

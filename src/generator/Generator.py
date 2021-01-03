@@ -24,6 +24,7 @@ int32 = ir.IntType(32)
 int64 = ir.IntType(64)
 int8 = ir.IntType(8)
 void = ir.VoidType()
+size_t = int64
 
 int_types = [int1, int8, int16, int32, int64]
 
@@ -134,7 +135,8 @@ class Visitor(CCompilerVisitor):
             llvm_function.args[i].name = name
 
         # 函数 block
-        block: ir.Block = llvm_function.append_basic_block(name=f'{function_name}.entry')
+        alloca_block: ir.Block = llvm_function.append_basic_block(name=f'{function_name}.entry')
+        block: ir.Block = llvm_function.append_basic_block(name=f'{function_name}.code')
         self.functions[function_name] = llvm_function
 
         self.builder = ir.IRBuilder(block)
@@ -165,6 +167,7 @@ class Visitor(CCompilerVisitor):
                 self.builder.ret_void()
 
         # 处理完毕，退出函数作用域
+        ir.IRBuilder(alloca_block).branch(block)
         self.current_function = ''
         self.builder = None
         self.symbol_table.quit_scope()
@@ -395,12 +398,11 @@ class Visitor(CCompilerVisitor):
                                 raise SemanticError("External variable cannot be initialized.")
                         else:
                             if initializer is not None:
-                                variable.initializer = self.load_lvalue(initializer)
+                                variable.initializer = self.create_initializer_list(typ, initializer, True)
                             else:
                                 variable.initializer = ir.Constant(typ, None)
                 else:
-                    ir_builder = self.builder
-                    variable = ir_builder.alloca(typ, 1, identifier)
+                    variable = ir.IRBuilder(self.current_function.blocks[0]).alloca(typ, 1)
                     result = self.symbol_table.add_item(identifier, TypedValue(ir_value=variable,
                                                                                typ=typ,
                                                                                constant=False,
@@ -409,7 +411,39 @@ class Visitor(CCompilerVisitor):
                     if not result.success:
                         raise SemanticError("Symbol redefined: " + identifier, ctx)
                     if initializer:
-                        ir_builder.store(self.convert_type(initializer, typ, ctx), variable)
+                        if not isinstance(initializer, TypedValue):
+                            value = self.create_initializer_list(typ, initializer, True)
+                        else:
+                            value = self.convert_type(initializer, typ)
+                        self.builder.store(value, variable)
+
+    def visitInitializerList(self, ctx: CCompilerParser.InitializerListContext) -> List[Union[TypedValue, list]]:
+        """
+        initializerList
+            : initializer
+            | initializerList ',' initializer
+            ;
+        """
+        if ctx.initializerList():
+            initializers = self.visit(ctx.initializerList())
+        else:
+            initializers = []
+        initializers.append(self.visit(ctx.initializer()))
+        return initializers
+
+    def visitInitializer(self, ctx: CCompilerParser.InitializerContext) -> Union[TypedValue, list]:
+        """
+        initializer
+            : assignmentExpression
+            | '{' initializerList '}'
+            | '{' initializerList ',' '}'
+            ;
+        """
+        if ctx.initializerList():
+            return self.visit(ctx.initializerList())
+        else:
+            return self.visit(ctx.assignmentExpression())
+
 
     def visitInitDeclarator(self, ctx: CCompilerParser.InitDeclaratorContext):
         """
@@ -746,7 +780,11 @@ class Visitor(CCompilerVisitor):
         prev_list.append(self.visit(ctx.declarator()))
         return prev_list
 
-    def load_lvalue(self, lvalue_ptr: TypedValue) -> Union[ir.Value, ir.NamedValue]:
+    @staticmethod
+    def is_ir_constant(value: TypedValue) -> bool:
+        return isinstance(value.ir_value, ir.Constant)
+
+    def load_lvalue(self, lvalue_ptr: TypedValue) -> ir.Value:
         """
         从左值地址加载出一个值.
         如果是数组，不会被加载. 不要试图加载数组.
@@ -850,6 +888,57 @@ class Visitor(CCompilerVisitor):
             raise SemanticError("Cannot decay a non-array type.", ctx)
         pointer = self.builder.gep(value.ir_value, [int32_zero, int32_zero], inbounds=False)
         return TypedValue(ir_value=pointer, typ=value.type.element.as_pointer(), constant=False, lvalue_ptr=False)
+
+    def create_initializer_list(self, target_type: ir.Type,
+                                initializer_list: Union[TypedValue, List[Union[TypedValue, list]]],
+                                need_constant: bool) -> ir.Value:
+        """
+        根据所需要的类型，创建对应的 literal_array, literal_struct, ir.Constant, ir.Value.
+        """
+        if isinstance(target_type, ir.ArrayType):
+            # 创建 array
+            element_type = target_type.element
+            array_elements = []
+            if len(initializer_list) > target_type.count:
+                raise SemanticError("Invalid initializer: element count not match")
+            for initializer in initializer_list:
+                array_elements.append(self.create_initializer_list(element_type, initializer, need_constant))
+            if len(initializer_list) < target_type.count:
+                # 用 0 补足剩下的空间
+                zero_initializer = ir.Constant(element_type, None)
+                array_elements += ([zero_initializer] * (target_type.count - len(initializer_list)))
+            return ir.Constant.literal_array(array_elements)
+        elif isinstance(target_type, ElementNamedLiteralStructType):
+            # 创建 struct
+            if len(initializer_list) > len(target_type.elements):
+                raise SemanticError("Invalid initializer: element count not match")
+            struct_elements = []
+            for i in range(len(initializer_list)):
+                element_type = target_type.elements[i]
+                initializer = initializer_list[i]
+                struct_elements.append(self.create_initializer_list(element_type, initializer, need_constant))
+            for i in range(len(initializer_list), len(target_type.elements)):
+                element_type = target_type.elements[i]
+                struct_elements.append(ir.Constant(element_type, None))
+            return ir.Constant.literal_struct(struct_elements)
+        else:
+            # 非聚合类型
+            if not isinstance(initializer_list, TypedValue):
+                raise SemanticError("Cannot initialize a non aggregate element with an aggregate literal.")
+            if initializer_list.constant:
+                if need_constant:
+                    assert isinstance(initializer_list.ir_value, ir.Constant)
+                    if initializer_list.type != target_type:
+                        return ir.Constant(target_type, initializer_list.ir_value.constant)
+                    else:
+                        return initializer_list.ir_value
+                else:
+                    return self.load_lvalue(initializer_list)
+            else:
+                if need_constant:
+                    raise SemanticError("Constant value required for constant initializer.")
+                else:
+                    return self.convert_type(initializer_list, target_type)
 
     def convert_type(self, value: TypedValue, type: ir.Type, ctx=None) -> ir.Value:
         """
@@ -1138,8 +1227,10 @@ class Visitor(CCompilerVisitor):
             else:
                 return TypedValue(v2.ir_value, pointer_type.pointee, constant=False, name=None, lvalue_ptr=True)
         elif op == '+':
-            return self.visit(ctx.castExpression())
+            return v2
         elif op == '-':
+            if self.is_ir_constant(v2):
+                return const_value(ir.Constant(v2.type, -v2.ir_value.constant))
             rvalue = self.load_lvalue(v2)
             result: ir.Instruction = self.builder.neg(rvalue)
             return TypedValue(result, v2.type, constant=False, name=None, lvalue_ptr=False)
@@ -1159,12 +1250,12 @@ class Visitor(CCompilerVisitor):
         else:
             expression: TypedValue
             size = expression.type.get_abi_size(self.target_data)
-        return const_value(ir.Constant(int64, size))
+        return const_value(ir.Constant(size_t, size))
 
     def visitUnaryExpression_6(self, ctx: CCompilerParser.UnaryExpression_6Context) -> TypedValue:
         # 'sizeof' '(' typeName ')'
         typ: ir.Type = self.visit(ctx.typeName())
-        return const_value(ir.Constant(int64, typ.get_abi_size(self.target_data)))
+        return const_value(ir.Constant(size_t, typ.get_abi_size(self.target_data)))
 
     def visitCastExpression_1(self, ctx: CCompilerParser.CastExpression_1Context) -> TypedValue:
         # '(' typeName ')' castExpression
