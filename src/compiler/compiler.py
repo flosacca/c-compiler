@@ -345,7 +345,7 @@ class Visitor(CVisitor):
         语法规则：
             forDeclaration
                 :   declarationSpecifiers initDeclaratorList ';'
-                | 	declarationSpecifiers ';'
+                |   declarationSpecifiers ';'
                 ;
 
         Args:

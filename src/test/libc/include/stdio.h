@@ -7,29 +7,29 @@
 #define stdout  (&_iob[STDOUT_FILENO])
 #define stderr  (&_iob[STDERR_FILENO])
 
-#define STDIN_FILENO	0
-#define STDOUT_FILENO	1
-#define STDERR_FILENO	2
+#define STDIN_FILENO    0
+#define STDOUT_FILENO   1
+#define STDERR_FILENO   2
 
-#define EOF	            (-1)
+#define EOF             (-1)
 
-#define SEEK_SET	     0
-#define SEEK_CUR	     1
-#define SEEK_END	     2
+#define SEEK_SET         0
+#define SEEK_CUR         1
+#define SEEK_END         2
 
 typedef struct _iobuf
 {
-  char	*_ptr;
-  int	 _cnt;
-  char	*_base;
-  int	 _flag;
-  int	 _file;
-  int	 _charbuf;
-  int	 _bufsiz;
-  char	*_tmpfname;
+  char  *_ptr;
+  int    _cnt;
+  char  *_base;
+  int    _flag;
+  int    _file;
+  int    _charbuf;
+  int    _bufsiz;
+  char  *_tmpfname;
 } FILE;
 
-extern FILE _iob[];	/* An array of FILE imported from DLL. */
+extern FILE _iob[]; /* An array of FILE imported from DLL. */
 
 __cdecl FILE * fopen (const char * _1, const char * _2);
 __cdecl FILE * freopen (const char * _1, const char * _2, FILE * _3);

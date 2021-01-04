@@ -3,7 +3,7 @@
 
 #include <stddef.h>
 
-#define CLOCKS_PER_SEC	((clock_t)(1000))
+#define CLOCKS_PER_SEC  ((clock_t)(1000))
 
 typedef long clock_t;
 
@@ -13,15 +13,15 @@ struct tm
    * that we are within the scope of <time.h> itself, so we must provide
    * the complete structure declaration here.
    */
-  int  tm_sec;  	/* Seconds: 0-60 (to accommodate leap seconds) */
-  int  tm_min;  	/* Minutes: 0-59 */
-  int  tm_hour; 	/* Hours since midnight: 0-23 */
-  int  tm_mday; 	/* Day of the month: 1-31 */
-  int  tm_mon;  	/* Months *since* January: 0-11 */
-  int  tm_year; 	/* Years since 1900 */
-  int  tm_wday; 	/* Days since Sunday (0-6) */
-  int  tm_yday; 	/* Days since Jan. 1: 0-365 */
-  int  tm_isdst;	/* +1=Daylight Savings Time, 0=No DST, -1=unknown */
+  int  tm_sec;      /* Seconds: 0-60 (to accommodate leap seconds) */
+  int  tm_min;      /* Minutes: 0-59 */
+  int  tm_hour;     /* Hours since midnight: 0-23 */
+  int  tm_mday;     /* Day of the month: 1-31 */
+  int  tm_mon;      /* Months *since* January: 0-11 */
+  int  tm_year;     /* Years since 1900 */
+  int  tm_wday;     /* Days since Sunday (0-6) */
+  int  tm_yday;     /* Days since Jan. 1: 0-365 */
+  int  tm_isdst;    /* +1=Daylight Savings Time, 0=No DST, -1=unknown */
 };
 
 __cdecl clock_t  clock ();
