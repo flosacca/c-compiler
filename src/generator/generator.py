@@ -213,7 +213,7 @@ class Visitor(CCompilerVisitor):
             typ1 = ir.FunctionType(typ, parameter_list.arg_list, parameter_list.var_arg)
             identifier2, typ2, _ = declarator_func(typ1, specifiers)
             for func_spec in specifiers.get_function_specifiers():
-                if func_spec == "__cdcel":
+                if func_spec == "__cdecl":
                     parameter_list.calling_convention = "ccc"
                 elif func_spec == "__stdcall":
                     parameter_list.calling_convention = "cc 65"
