@@ -822,18 +822,28 @@ class Visitor(CVisitor):
         return prev_list
 
     def visitStructDeclaration(self, ctx: CParser.StructDeclarationContext) -> List[Tuple[ir.Type, str]]:
-        # structDeclaration : declarationSpecifiers structDeclaratorList ';' ;
+        # structDeclaration : declarationSpecifiers structDeclaratorList? ';' ;
         specifiers: DeclarationSpecifiers = self.visit(ctx.declarationSpecifiers())
-        decl_list = self.visit(ctx.structDeclaratorList())
+        if ctx.structDeclaratorList():
+            decl_list = self.visit(ctx.structDeclaratorList())
+        else:
+            decl_list = None
         base_type: ir.Type = specifiers.get_type()
         if base_type is None:
             raise SemanticError("Unspecified declarator type", ctx)
         member_list = []
-        for decl in decl_list:
-            identifier, typ, parameter_list = decl(base_type, specifiers)
-            if specifiers.is_typedef():
-                raise SemanticError("Illegal typedef here", ctx)
-            member_list.append((typ, identifier))
+        if decl_list is not None:
+            for decl in decl_list:
+                identifier, typ, parameter_list = decl(base_type, specifiers)
+                if specifiers.is_typedef():
+                    raise SemanticError("Illegal typedef here", ctx)
+                member_list.append((typ, identifier))
+        else:
+            if isinstance(base_type, ElementNamedLiteralStructType):
+                member_list.append((base_type, None))
+            else:
+                # todo: warning
+                print("Declaration does not declare anything.")
         return member_list
 
     def visitStructDeclaratorList(self, ctx: CParser.StructDeclaratorListContext):
@@ -1185,12 +1195,12 @@ class Visitor(CVisitor):
         member_name = ctx.Identifier().getText()
         ls_type: ElementNamedLiteralStructType = rvalue.type
         try:
-            member_index = ls_type.index(member_name)
-            member_type = ls_type.elements[member_index]
+            member_index, member_type = ls_type.get_element_by_name(member_name)
+            member_index = [ir.Constant(int32, idx) for idx in member_index]
         except ValueError:
             raise SemanticError("Postfix expression(#4) has not such attribute.", ctx)
         # 获得地址
-        result = self.builder.gep(v1.ir_value, [int32_zero, ir.Constant(int32, member_index)], inbounds=False)
+        result = self.builder.gep(v1.ir_value, [int32_zero] + member_index, inbounds=False)
         return TypedValue(result, member_type, constant=False, name=None, lvalue_ptr=True)
 
     def visitPostfixExpression_5(self, ctx: CParser.PostfixExpression_5Context) -> TypedValue:
@@ -1204,12 +1214,12 @@ class Visitor(CVisitor):
         member_name = ctx.Identifier().getText()
         ls_type: ElementNamedLiteralStructType = pointee_type
         try:
-            member_index = ls_type.index(member_name)
-            member_type = ls_type.elements[member_index]
+            member_index, member_type = ls_type.get_element_by_name(member_name)
+            member_index = [ir.Constant(int32, idx) for idx in member_index]
         except ValueError:
             raise SemanticError("Postfix expression(#5) has not such attribute.", ctx)
         # 获得地址
-        result = self.builder.gep(rvalue, [int32_zero, ir.Constant(int32, member_index)], inbounds=False)
+        result = self.builder.gep(rvalue, [int32_zero] + member_index, inbounds=False)
         return TypedValue(result, member_type, constant=False, name=None, lvalue_ptr=True)
 
     def visitPostfixExpression_6(self, ctx: CParser.PostfixExpression_6Context) -> TypedValue:

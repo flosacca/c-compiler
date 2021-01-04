@@ -287,6 +287,7 @@ structDeclarationList
 
 structDeclaration
     :   declarationSpecifiers structDeclaratorList ';'
+    |   declarationSpecifiers ';'
     ;
 
 structDeclaratorList

@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Tuple, Optional
 
 from llvmlite import ir
 
@@ -51,12 +51,28 @@ class ElementNamedLiteralStructType(ir.LiteralStructType):
         """
         ir.LiteralStructType.__init__(self, elems, packed)
         self.names = tuple(names)
+        self.lookup_cache = {}
 
-    def index(self, name: str) -> int:
+    def get_element_by_name(self, name: str) -> Optional[Tuple[List[int], ir.Type]]:
         """
-        寻找名字对应的下标. 找不到时抛出异常.
+        寻找名字对应的下标. 找不到时返回 None.
         @param name: 名字
         @return: 下标
         """
-        return self.names.index(name)
-
+        for i in range(len(self.names)):
+            if self.names[i] == name:
+                return [i], self.elements[i]
+        try:
+            return self.lookup_cache[name]
+        except KeyError:
+            pass
+        for i in range(len(self.names)):
+            if self.names[i] is None:
+                elem: ElementNamedLiteralStructType = self.elements[i]
+                result = elem.get_element_by_name(name)
+                if result is not None:
+                    result = ([i] + result[0], result[1])
+                    self.lookup_cache[name] = result
+                    return result
+        self.lookup_cache[name] = None
+        return None
