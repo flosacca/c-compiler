@@ -11,7 +11,7 @@ int check(const char* s) {
 }
 
 int main() {
-    char s[1000];
+    static char s[100005];
     scanf("%s", s);
     int i = check(s);
     if (~i)

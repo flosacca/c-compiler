@@ -1,4 +1,4 @@
-grammar CCompiler;
+grammar C;
 
 // Parser rules
 
@@ -161,7 +161,7 @@ iterationStatement
     | 'for' '(' first=forInitialization ';' second=forExpression? ';' third=forExpression? ')' statement
     ;
 
-forExpression : expression;
+forExpression : expression ;
 
 forInitialization : expression? | forDeclaration ;
 

@@ -5,7 +5,7 @@ import getopt
 
 from typing import List
 
-from generator.generator import generate
+import compiler
 
 
 def usage():
@@ -25,16 +25,16 @@ if __name__ == '__main__':
         sys.exit(0)
     if len(args) != 1:
         print('输入文件未指定或过多。')
+        sys.exit(1)
     pass_args['input_file'] = args[0]
     pass_args['output_file'] = \
         '.'.join((args[0].split('.'))[0:-1]) + '.ll' if args[0].count('.') != 0 else args[0] + '.ll'
     pass_args['target_arch'] = 'x86_64-pc-linux-gnu'
     pass_args['include_dirs'] = list()
-    pass_args['macro_list'] = dict()
+    pass_args['macros'] = dict()
     for opt_name, opt_value in opts:
         if opt_name in ('-h', '--help'):
-            # impossible
-            pass
+            pass # impossible
         elif opt_name in ('-o', '--output'):
             pass_args['output_file'] = opt_value
         elif opt_name in ('-t', '--target'):
@@ -47,8 +47,8 @@ if __name__ == '__main__':
             if macro_name == '':
                 print('Macro name could not be empty.')
                 sys.exit(1)
-            pass_args['macro_list'][macro_name] = None
+            pass_args['macros'][macro_name] = None
             if len(l) > 1:
                 macro_value = '='.join(l[1:])
-                pass_args['macro_list'][macro_name] = macro_value
-    generate(**pass_args)
+                pass_args['macros'][macro_name] = macro_value
+    compiler.compile(**pass_args)

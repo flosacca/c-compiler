@@ -6,16 +6,15 @@ import os
 import sys
 from typing import Dict, List, Union, Optional, Tuple, Any, Type
 
-from generator.error_listener import SemanticError
-from generator.error_listener import SyntaxErrorListener
-from generator.symbol_table import SymbolTable, TypedValue, const_value, ParameterList, DeclarationSpecifiers, \
-    ElementNamedLiteralStructType
-from cparser.CCompilerLexer import CCompilerLexer
-from cparser.CCompilerParser import CCompilerParser
-from cparser.CCompilerVisitor import CCompilerVisitor
-from generator.parser_util import Result
-
-from cpreprocess.preprocessor import preprocess
+from .error_listener import SemanticError, SyntaxErrorListener
+from .symbol_table import SymbolTable
+from .values import TypedValue, const_value, ElementNamedLiteralStructType
+from .elements import ParameterList, DeclarationSpecifiers
+from .utils import Result
+from parser.CLexer import CLexer
+from parser.CParser import CParser
+from parser.CVisitor import CVisitor
+from preprocessor import preprocess
 
 double = ir.DoubleType()
 int1 = ir.IntType(1)
@@ -31,26 +30,24 @@ int_types = [int1, int8, int16, int32, int64]
 int32_zero = ir.Constant(int32, 0)
 
 
-class Visitor(CCompilerVisitor):
+class Visitor(CVisitor):
     """
-    生成器类，用于进行语义分析并且转化为LLVM
+    语义分析，生成 llvm
     """
 
     def __init__(self, target: str = 'x86_64-pc-linux-gnu'):
-        super(CCompilerVisitor, self).__init__()
+        super().__init__()
 
-        # 控制llvm生成
+        # llvm 配置
         self.module: ir.Module = ir.Module()
-        self.module.triple = target  # llvm.Target.from_default_triple()
-        # llvm.create_mcjit_compiler(backing_mod, target_machine)
-        self.data_layout = 'e-m:e-i64:64-f80:128-n8:16:32:64-S128'
-        self.module.data_layout = self.data_layout
+        self.module.triple = target
+        data_layout = 'e-m:e-i64:64-f80:128-n8:16:32:64-S128'
+        self.module.data_layout = data_layout
 
-        # llvm data layout
-        self.target_data = binding.create_target_data(self.data_layout)
+        self.target_data = binding.create_target_data(data_layout)
 
-        # 待生成的 llvm 语句块
-        self.builder: ir.IRBuilder
+        # 当前 llvm block 的语句生成器，在任何 visit 后都可能被改变
+        self.builder: Optional[ir.IRBuilder] = None
 
         # 用于控制语句的标号
         self.continue_blocks: ir.BasicBlock = []
@@ -83,7 +80,7 @@ class Visitor(CCompilerVisitor):
         """
         return self.symbol_table.is_global()
 
-    def visitFunctionDefinition(self, ctx: CCompilerParser.FunctionDefinitionContext) -> None:
+    def visitFunctionDefinition(self, ctx: CParser.FunctionDefinitionContext) -> None:
         """
         函数定义.
 
@@ -93,7 +90,7 @@ class Visitor(CCompilerVisitor):
                 ;
 
         Args:
-            ctx (CCompilerParser.FunctionDefinitionContext):
+            ctx (CParser.FunctionDefinitionContext):
 
         Returns:
             None
@@ -159,7 +156,7 @@ class Visitor(CCompilerVisitor):
         self.visit(ctx.compoundStatement())  # funcBody
         if not self.builder.basic_block.is_terminated:
             if function_name == 'main':
-                self.builder.ret(ir.Constant(int32, 0))
+                self.builder.ret(int32_zero)
             else:
                 self.builder.ret_void()
 
@@ -170,20 +167,20 @@ class Visitor(CCompilerVisitor):
         self.symbol_table.quit_scope()
         return
 
-    def visitDirectDeclarator_1(self, ctx: CCompilerParser.DirectDeclarator_1Context):
+    def visitDirectDeclarator_1(self, ctx: CParser.DirectDeclarator_1Context):
         """
         directDeclarator : Identifier
         """
         identifier = ctx.getText()
         return lambda typ, _: (identifier, typ, None)
 
-    def visitDirectDeclarator_2(self, ctx: CCompilerParser.DirectDeclarator_2Context):
+    def visitDirectDeclarator_2(self, ctx: CParser.DirectDeclarator_2Context):
         """
         directDeclarator : '(' declarator ')'
         """
         return self.visit(ctx.declarator())
 
-    def visitDirectDeclarator_3(self, ctx: CCompilerParser.DirectDeclarator_3Context):
+    def visitDirectDeclarator_3(self, ctx: CParser.DirectDeclarator_3Context):
         """
         directDeclarator : directDeclarator '[' assignmentExpression? ']'
         """
@@ -202,7 +199,7 @@ class Visitor(CCompilerVisitor):
 
         return create_arr_ret
 
-    def visitDirectDeclarator_4(self, ctx: CCompilerParser.DirectDeclarator_4Context):
+    def visitDirectDeclarator_4(self, ctx: CParser.DirectDeclarator_4Context):
         """
         directDeclarator : directDeclarator '(' parameterTypeList ')'
         """
@@ -221,7 +218,7 @@ class Visitor(CCompilerVisitor):
 
         return create_func_ret
 
-    def visitParameterTypeList(self, ctx: CCompilerParser.ParameterTypeListContext) -> ParameterList:
+    def visitParameterTypeList(self, ctx: CParser.ParameterTypeListContext) -> ParameterList:
         """
         Parameter type list
         语法规则: parameterTypeList : | parameterList | parameterList ',' '...' ;
@@ -231,7 +228,7 @@ class Visitor(CCompilerVisitor):
             return ParameterList(self.visit(ctx.parameterList()), ctx.getChildCount() == 3)
         return ParameterList([], False)
 
-    def visitParameterList(self, ctx: CCompilerParser.ParameterListContext) -> List[Tuple[ir.Type, Optional[str]]]:
+    def visitParameterList(self, ctx: CParser.ParameterListContext) -> List[Tuple[ir.Type, Optional[str]]]:
         """
         Parameters
 
@@ -251,7 +248,7 @@ class Visitor(CCompilerVisitor):
         prev_list.append(param)
         return prev_list
 
-    def visitParameterDeclaration(self, ctx: CCompilerParser.ParameterDeclarationContext) -> Tuple[
+    def visitParameterDeclaration(self, ctx: CParser.ParameterDeclarationContext) -> Tuple[
         ir.Type, Optional[str]]:
         """
         Parameter declaration
@@ -269,7 +266,7 @@ class Visitor(CCompilerVisitor):
             typ = typ.element.as_pointer()
         return typ, identifier
 
-    def visitDeclarationSpecifiers(self, ctx: CCompilerParser.DeclarationSpecifiersContext) -> DeclarationSpecifiers:
+    def visitDeclarationSpecifiers(self, ctx: CParser.DeclarationSpecifiersContext) -> DeclarationSpecifiers:
         """
         声明限定符列表.
 
@@ -277,7 +274,7 @@ class Visitor(CCompilerVisitor):
             declarationSpecifiers: declarationSpecifier*;
 
         Args:
-            ctx (CCompilerParser.DeclarationSpecifiersContext):
+            ctx (CParser.DeclarationSpecifiersContext):
 
         Returns:
             List[Tuple[str, Any]]: 限定符列表
@@ -288,7 +285,7 @@ class Visitor(CCompilerVisitor):
             specifiers.append(typ, val)
         return specifiers
 
-    def visitDeclarationSpecifier(self, ctx: CCompilerParser.DeclarationSpecifierContext) -> (str, Union[str, ir.Type]):
+    def visitDeclarationSpecifier(self, ctx: CParser.DeclarationSpecifierContext) -> (str, Union[str, ir.Type]):
         """
         声明限定符
 
@@ -310,7 +307,7 @@ class Visitor(CCompilerVisitor):
             return "function_specifier", self.visit(ctx.functionSpecifier())
         raise SemanticError('impossible')
 
-    def visitDeclarator(self, ctx: CCompilerParser.DeclaratorContext):
+    def visitDeclarator(self, ctx: CParser.DeclaratorContext):
         """
         描述符.
 
@@ -320,7 +317,7 @@ class Visitor(CCompilerVisitor):
                 ;
 
         Args:
-            ctx (CCompilerParser.DeclaratorContext):
+            ctx (CParser.DeclaratorContext):
 
         Returns:
             lambda typ : (str, ir.Type, Optional[ParameterList])
@@ -342,7 +339,7 @@ class Visitor(CCompilerVisitor):
             return pointer_declarator
         return declarator_func
 
-    def visitForDeclaration(self, ctx: CCompilerParser.ForDeclarationContext) -> None:
+    def visitForDeclaration(self, ctx: CParser.ForDeclarationContext) -> None:
         """
         声明.
 
@@ -353,7 +350,7 @@ class Visitor(CCompilerVisitor):
                 ;
 
         Args:
-            ctx (CCompilerParser.DeclarationContext):
+            ctx (CParser.DeclarationContext):
 
         Returns:
             None
@@ -424,7 +421,7 @@ class Visitor(CCompilerVisitor):
                             value = self.convert_type(initializer, typ)
                         self.builder.store(value, variable)
 
-    def visitInitializerList(self, ctx: CCompilerParser.InitializerListContext) -> List[Union[TypedValue, list]]:
+    def visitInitializerList(self, ctx: CParser.InitializerListContext) -> List[Union[TypedValue, list]]:
         """
         initializerList
             : initializer
@@ -438,7 +435,7 @@ class Visitor(CCompilerVisitor):
         initializers.append(self.visit(ctx.initializer()))
         return initializers
 
-    def visitInitializer(self, ctx: CCompilerParser.InitializerContext) -> Union[TypedValue, list]:
+    def visitInitializer(self, ctx: CParser.InitializerContext) -> Union[TypedValue, list]:
         """
         initializer
             : assignmentExpression
@@ -451,7 +448,7 @@ class Visitor(CCompilerVisitor):
         else:
             return self.visit(ctx.assignmentExpression())
 
-    def visitInitDeclarator(self, ctx: CCompilerParser.InitDeclaratorContext):
+    def visitInitDeclarator(self, ctx: CParser.InitDeclaratorContext):
         """
         初始化声明.
 
@@ -475,7 +472,7 @@ class Visitor(CCompilerVisitor):
             initializer = None
         return declarator, initializer
 
-    def visitInitDeclaratorList(self, ctx: CCompilerParser.InitDeclaratorListContext) -> List[tuple]:
+    def visitInitDeclaratorList(self, ctx: CParser.InitDeclaratorListContext) -> List[tuple]:
         """
         初始化声明列表.
 
@@ -495,7 +492,7 @@ class Visitor(CCompilerVisitor):
         init_declarator_list.append(self.visit(ctx.initDeclarator()))
         return init_declarator_list
 
-    def visitQualifiedPointer(self, ctx: CCompilerParser.QualifiedPointerContext) -> Dict[str, bool]:
+    def visitQualifiedPointer(self, ctx: CParser.QualifiedPointerContext) -> Dict[str, bool]:
         """
         指针修饰符
 
@@ -503,7 +500,7 @@ class Visitor(CCompilerVisitor):
             pointer : '*' typeQualifierList?
 
         Args:
-            ctx (CCompilerParser.QualifiedPointerContext):
+            ctx (CParser.QualifiedPointerContext):
 
         Returns:
             {
@@ -519,7 +516,7 @@ class Visitor(CCompilerVisitor):
             'volatile': 'volatile' in qualifiers,
         }
 
-    def visitPointer(self, ctx: CCompilerParser.PointerContext) -> List[Dict[str, bool]]:
+    def visitPointer(self, ctx: CParser.PointerContext) -> List[Dict[str, bool]]:
         """
         指针修饰符列表
 
@@ -527,7 +524,7 @@ class Visitor(CCompilerVisitor):
             pointer : qualifiedPointer | pointer qualifiedPointer
 
         Args:
-            ctx (CCompilerParser.PointerContext):
+            ctx (CParser.PointerContext):
 
         Returns:
             {
@@ -542,7 +539,7 @@ class Visitor(CCompilerVisitor):
         else:
             return [self.visit(ctx.getChild(0))]
 
-    def visitTypeQualifierList(self, ctx: CCompilerParser.TypeQualifierListContext) -> List[str]:
+    def visitTypeQualifierList(self, ctx: CParser.TypeQualifierListContext) -> List[str]:
         """
         修饰符列表
 
@@ -550,7 +547,7 @@ class Visitor(CCompilerVisitor):
             typeQualifierList : typeQualifier+
 
         Args:
-            ctx (CCompilerParser.TypeQualifierListContext):
+            ctx (CParser.TypeQualifierListContext):
 
         Returns:
             List[str]: 修饰符列表
@@ -560,7 +557,7 @@ class Visitor(CCompilerVisitor):
             qualifiers.append(self.visit(ctx.getChild(i)))
         return qualifiers
 
-    def visitTypeQualifier(self, ctx: CCompilerParser.TypeQualifierContext) -> str:
+    def visitTypeQualifier(self, ctx: CParser.TypeQualifierContext) -> str:
         """
         修饰符
 
@@ -568,18 +565,18 @@ class Visitor(CCompilerVisitor):
             typeQualifier : 'const' | 'volatile' ;
 
         Args:
-            ctx (CCompilerParser.TypeQualifierContext):
+            ctx (CParser.TypeQualifierContext):
 
         Returns:
             str: 修饰符
         """
         return ctx.getText()
 
-    def visitTypeSpecifier_1(self, ctx: CCompilerParser.TypeSpecifier_3Context) -> ir.Type:
+    def visitTypeSpecifier_1(self, ctx: CParser.TypeSpecifier_3Context) -> ir.Type:
         # typeSpecifier : primitiveType
         return self.visit(ctx.primitiveType())
 
-    def visitTypeSpecifier_2(self, ctx: CCompilerParser.TypeSpecifier_2Context) -> ir.Type:
+    def visitTypeSpecifier_2(self, ctx: CParser.TypeSpecifier_2Context) -> ir.Type:
         # typeSpecifier : typedefName
         type_id: str = ctx.getText()
         actual_type = self.symbol_table.get_item(type_id)
@@ -589,7 +586,7 @@ class Visitor(CCompilerVisitor):
             raise SemanticError("Invalid type: " + type_id, ctx)
         return actual_type
 
-    def visitTypeSpecifier_3(self, ctx: CCompilerParser.TypeSpecifier_1Context) -> ir.Type:
+    def visitTypeSpecifier_3(self, ctx: CParser.TypeSpecifier_1Context) -> ir.Type:
         # typeSpecifier : typeSpecifier pointer
         base_type: ir.Type = self.visit(ctx.typeSpecifier())
         pointer_list: list = self.visit(ctx.pointer())
@@ -597,7 +594,7 @@ class Visitor(CCompilerVisitor):
             base_type = base_type.as_pointer()
         return base_type
 
-    def visitEnumSpecifier(self, ctx: CCompilerParser.EnumSpecifierContext) -> ir.Type:
+    def visitEnumSpecifier(self, ctx: CParser.EnumSpecifierContext) -> ir.Type:
         """
         enumSpecifier
             :   'enum' Identifier? '{' enumeratorList '}'
@@ -633,7 +630,7 @@ class Visitor(CCompilerVisitor):
                 raise SemanticError("Undefined identifier: " + identifier)
             return item
 
-    def visitEnumeratorList(self, ctx: CCompilerParser.EnumeratorListContext) -> List[
+    def visitEnumeratorList(self, ctx: CParser.EnumeratorListContext) -> List[
             Tuple[str, Optional[ir.Constant]]]:
         """
         enumeratorList
@@ -648,7 +645,7 @@ class Visitor(CCompilerVisitor):
         enumerators.append(self.visit(ctx.enumerator()))
         return enumerators
 
-    def visitEnumerator(self, ctx: CCompilerParser.EnumeratorContext) -> Tuple[str, Optional[ir.Constant]]:
+    def visitEnumerator(self, ctx: CParser.EnumeratorContext) -> Tuple[str, Optional[ir.Constant]]:
         """
         enumerator
             :   Identifier
@@ -665,12 +662,12 @@ class Visitor(CCompilerVisitor):
             constant: Optional[ir.Constant] = None
         return identifier, constant
 
-    def visitCompoundStatement(self, ctx: CCompilerParser.CompoundStatementContext) -> None:
+    def visitCompoundStatement(self, ctx: CParser.CompoundStatementContext) -> None:
         self.symbol_table.enter_scope()
         self.visitChildren(ctx)
         self.symbol_table.quit_scope()
 
-    def visitSelectionStatement(self, ctx: CCompilerParser.SelectionStatementContext) -> None:
+    def visitSelectionStatement(self, ctx: CParser.SelectionStatementContext) -> None:
         """
         selectionStatement
             : 'if' '(' expression ')' statement ('else' statement)?
@@ -702,7 +699,7 @@ class Visitor(CCompilerVisitor):
             raise SemanticError("Not implemented", ctx)
         raise SemanticError('impossible')
 
-    def visitIterationStatement(self, ctx: CCompilerParser.SelectionStatementContext) -> None:
+    def visitIterationStatement(self, ctx: CParser.SelectionStatementContext) -> None:
         """
         iterationStatement
             : 'while' '(' expression ')' statement
@@ -752,7 +749,7 @@ class Visitor(CCompilerVisitor):
             self.symbol_table.quit_scope()
         self.builder = ir.IRBuilder(block_end)
 
-    def visitJumpStatement(self, ctx: CCompilerParser.JumpStatementContext) -> None:
+    def visitJumpStatement(self, ctx: CParser.JumpStatementContext) -> None:
         """
         jumpStatement
             : 'continue' ';'
@@ -783,7 +780,7 @@ class Visitor(CCompilerVisitor):
             return
         raise SemanticError('impossible')
 
-    def visitStructSpecifier_1(self, ctx: CCompilerParser.StructSpecifier_1Context) -> ElementNamedLiteralStructType:
+    def visitStructSpecifier_1(self, ctx: CParser.StructSpecifier_1Context) -> ElementNamedLiteralStructType:
         # structSpecifier : 'struct' Identifier? '{' structDeclarationList '}'
         identifier_ctx = ctx.Identifier()
         if identifier_ctx is not None:
@@ -801,7 +798,7 @@ class Visitor(CCompilerVisitor):
             self.symbol_table.add_item(identifier, struct_type)
         return struct_type
 
-    def visitStructSpecifier_2(self, ctx: CCompilerParser.StructSpecifier_2Context) -> ElementNamedLiteralStructType:
+    def visitStructSpecifier_2(self, ctx: CParser.StructSpecifier_2Context) -> ElementNamedLiteralStructType:
         # structSpecifier : 'struct' Identifier
         identifier = f'struct {ctx.Identifier().getText()}'
         item = self.symbol_table.get_item(identifier)
@@ -809,7 +806,7 @@ class Visitor(CCompilerVisitor):
             raise SemanticError("Undefined identifier: " + identifier)
         return item
 
-    def visitStructDeclarationList(self, ctx: CCompilerParser.StructDeclarationListContext) -> List[
+    def visitStructDeclarationList(self, ctx: CParser.StructDeclarationListContext) -> List[
         Tuple[ir.Type, str]]:
         """
         语法规则：
@@ -825,7 +822,7 @@ class Visitor(CCompilerVisitor):
         prev_list += self.visit(ctx.structDeclaration())
         return prev_list
 
-    def visitStructDeclaration(self, ctx: CCompilerParser.StructDeclarationContext) -> List[Tuple[ir.Type, str]]:
+    def visitStructDeclaration(self, ctx: CParser.StructDeclarationContext) -> List[Tuple[ir.Type, str]]:
         # structDeclaration : declarationSpecifiers structDeclaratorList ';' ;
         specifiers: DeclarationSpecifiers = self.visit(ctx.declarationSpecifiers())
         decl_list = self.visit(ctx.structDeclaratorList())
@@ -840,7 +837,7 @@ class Visitor(CCompilerVisitor):
             member_list.append((typ, identifier))
         return member_list
 
-    def visitStructDeclaratorList(self, ctx: CCompilerParser.StructDeclaratorListContext):
+    def visitStructDeclaratorList(self, ctx: CParser.StructDeclaratorListContext):
         """
         语法规则:
             structDeclaratorList
@@ -956,7 +953,6 @@ class Visitor(CCompilerVisitor):
         raise SemanticError('Bit extend error.', ctx=ctx)
 
     def decay(self, value: TypedValue, ctx=None) -> TypedValue:
-        # decay
         if not isinstance(value.type, ir.ArrayType):
             if value.type.is_pointer:
                 return value
@@ -1073,7 +1069,7 @@ class Visitor(CCompilerVisitor):
         else:
             raise SemanticError('Not supported type conversion.', ctx=ctx)
 
-    def visitConstant(self, ctx: CCompilerParser.ConstantContext) -> TypedValue:
+    def visitConstant(self, ctx: CParser.ConstantContext) -> TypedValue:
         text = ctx.getText()
         if ctx.IntegerConstant():
             if re.fullmatch('0[0-7]*', text):
@@ -1087,7 +1083,7 @@ class Visitor(CCompilerVisitor):
             return const_value(ir.Constant(int8, ord(text[1])))
         raise SemanticError('impossible')
 
-    def visitPrimaryExpression(self, ctx: CCompilerParser.PrimaryExpressionContext) -> TypedValue:
+    def visitPrimaryExpression(self, ctx: CParser.PrimaryExpressionContext) -> TypedValue:
         """
         Primary Expression
         """
@@ -1108,19 +1104,13 @@ class Visitor(CCompilerVisitor):
             return self.visit(ctx.expression())
         raise SemanticError('impossible')
 
-    def visitPrimitiveType(self, ctx: CCompilerParser.PrimitiveTypeContext) -> ir.Type:
+    def visitPrimitiveType(self, ctx: CParser.PrimitiveTypeContext) -> ir.Type:
         """
         Primitive type
         """
         return self.symbol_table.get_item(ctx.getText())
 
-    def visitPostfixExpression_1(self, ctx: CCompilerParser.PostfixExpression_1Context) -> TypedValue:
-        # primaryExpression
-        v1: TypedValue = self.visit(ctx.getChild(0))
-        return v1
-        # pass
-
-    def visitPostfixExpression_2(self, ctx: CCompilerParser.PostfixExpression_2Context) -> TypedValue:
+    def visitPostfixExpression_2(self, ctx: CParser.PostfixExpression_2Context) -> TypedValue:
         # postfixExpression '[' expression ']'
         v1: TypedValue = self.visit(ctx.getChild(0))
         is_pointer = isinstance(v1.type, ir.types.PointerType)
@@ -1143,7 +1133,7 @@ class Visitor(CCompilerVisitor):
             raise SemanticError("Postfix expression(#2) is not a array or pointer.", ctx=ctx)
         return TypedValue(result, result_type, constant=False, name=None, lvalue_ptr=True)
 
-    def visitPostfixExpression_3(self, ctx: CCompilerParser.PostfixExpression_3Context) -> TypedValue:
+    def visitPostfixExpression_3(self, ctx: CParser.PostfixExpression_3Context) -> TypedValue:
         # postfixExpression '(' argumentExpressionList? ')'
         # 函数调用
         func_value: TypedValue = self.visit(ctx.postfixExpression())
@@ -1178,7 +1168,7 @@ class Visitor(CCompilerVisitor):
         ret_value = self.builder.call(func_pointer, func_args)
         return TypedValue(ir_value=ret_value, typ=ret_value.type, constant=False, name=None, lvalue_ptr=False)
 
-    def visitPostfixExpression_4(self, ctx: CCompilerParser.PostfixExpression_4Context) -> TypedValue:
+    def visitPostfixExpression_4(self, ctx: CParser.PostfixExpression_4Context) -> TypedValue:
         # postfixExpression '.' Identifier
         v1: TypedValue = self.visit(ctx.getChild(0))
         if not v1.lvalue_ptr:
@@ -1197,7 +1187,7 @@ class Visitor(CCompilerVisitor):
         result = self.builder.gep(v1.ir_value, [int32_zero, ir.Constant(int32, member_index)], inbounds=False)
         return TypedValue(result, member_type, constant=False, name=None, lvalue_ptr=True)
 
-    def visitPostfixExpression_5(self, ctx: CCompilerParser.PostfixExpression_5Context) -> TypedValue:
+    def visitPostfixExpression_5(self, ctx: CParser.PostfixExpression_5Context) -> TypedValue:
         # postfixExpression '->' Identifier
         v1: TypedValue = self.visit(ctx.getChild(0))
         rvalue: ir.NamedValue = self.load_lvalue(v1)  # 这里事实上获得一个指针
@@ -1216,7 +1206,7 @@ class Visitor(CCompilerVisitor):
         result = self.builder.gep(rvalue, [int32_zero, ir.Constant(int32, member_index)], inbounds=False)
         return TypedValue(result, member_type, constant=False, name=None, lvalue_ptr=True)
 
-    def visitPostfixExpression_6(self, ctx: CCompilerParser.PostfixExpression_6Context) -> TypedValue:
+    def visitPostfixExpression_6(self, ctx: CParser.PostfixExpression_6Context) -> TypedValue:
         # postfixExpression '++'
         v1: TypedValue = self.visit(ctx.getChild(0))
         rvalue = self.load_lvalue(v1)
@@ -1227,7 +1217,7 @@ class Visitor(CCompilerVisitor):
         self.store_lvalue(result, v1)
         return TypedValue(rvalue, v1.type, constant=False, name=None, lvalue_ptr=False)
 
-    def visitPostfixExpression_7(self, ctx: CCompilerParser.PostfixExpression_7Context) -> TypedValue:
+    def visitPostfixExpression_7(self, ctx: CParser.PostfixExpression_7Context) -> TypedValue:
         # postfixExpression '--'
         v1: TypedValue = self.visit(ctx.getChild(0))
         rvalue = self.load_lvalue(v1)
@@ -1238,7 +1228,7 @@ class Visitor(CCompilerVisitor):
         self.store_lvalue(result, v1)
         return TypedValue(rvalue, v1.type, constant=False, name=None, lvalue_ptr=False)
 
-    def visitArgumentExpressionList(self, ctx: CCompilerParser.ArgumentExpressionListContext) -> List[TypedValue]:
+    def visitArgumentExpressionList(self, ctx: CParser.ArgumentExpressionListContext) -> List[TypedValue]:
         """
         语法规则:
         argumentExpressionList
@@ -1255,11 +1245,11 @@ class Visitor(CCompilerVisitor):
         arg_expr_list.append(self.visit(ctx.assignmentExpression()))
         return arg_expr_list
 
-    def visitUnaryExpression_1(self, ctx: CCompilerParser.UnaryExpression_1Context) -> TypedValue:
+    def visitUnaryExpression_1(self, ctx: CParser.UnaryExpression_1Context) -> TypedValue:
         # postfixExpression
         return self.visit(ctx.getChild(0))
 
-    def visitUnaryExpression_2(self, ctx: CCompilerParser.UnaryExpression_2Context) -> TypedValue:
+    def visitUnaryExpression_2(self, ctx: CParser.UnaryExpression_2Context) -> TypedValue:
         # '++' unaryExpression
         v1: TypedValue = self.visit(ctx.unaryExpression())
         rvalue = self.load_lvalue(v1)
@@ -1270,7 +1260,7 @@ class Visitor(CCompilerVisitor):
         self.store_lvalue(result, v1)
         return v1
 
-    def visitUnaryExpression_3(self, ctx: CCompilerParser.UnaryExpression_3Context) -> TypedValue:
+    def visitUnaryExpression_3(self, ctx: CParser.UnaryExpression_3Context) -> TypedValue:
         # '--' unaryExpression
         v1 = self.visit(ctx.unaryExpression())
         rvalue = self.load_lvalue(v1)
@@ -1281,7 +1271,7 @@ class Visitor(CCompilerVisitor):
         self.store_lvalue(result, v1)
         return v1
 
-    def visitUnaryExpression_4(self, ctx: CCompilerParser.UnaryExpression_4Context) -> TypedValue:
+    def visitUnaryExpression_4(self, ctx: CParser.UnaryExpression_4Context) -> TypedValue:
         # unaryOperator castExpression
         op: str = ctx.unaryOperator().getText()
         v2: TypedValue = self.visit(ctx.castExpression())
@@ -1316,7 +1306,7 @@ class Visitor(CCompilerVisitor):
         elif op == '!':
             return self.typed_bool(v2, negation=True)
 
-    def visitUnaryExpression_5(self, ctx: CCompilerParser.UnaryExpression_5Context) -> TypedValue:
+    def visitUnaryExpression_5(self, ctx: CParser.UnaryExpression_5Context) -> TypedValue:
         # 'sizeof' unaryExpression
         # TODO 在不实际计算 expression 值的情况下完成
         expression = self.visit(ctx.unaryExpression())
@@ -1327,23 +1317,23 @@ class Visitor(CCompilerVisitor):
             size = expression.type.get_abi_size(self.target_data)
         return const_value(ir.Constant(size_t, size))
 
-    def visitUnaryExpression_6(self, ctx: CCompilerParser.UnaryExpression_6Context) -> TypedValue:
+    def visitUnaryExpression_6(self, ctx: CParser.UnaryExpression_6Context) -> TypedValue:
         # 'sizeof' '(' typeName ')'
         typ: ir.Type = self.visit(ctx.typeName())
         return const_value(ir.Constant(size_t, typ.get_abi_size(self.target_data)))
 
-    def visitCastExpression_1(self, ctx: CCompilerParser.CastExpression_1Context) -> TypedValue:
+    def visitCastExpression_1(self, ctx: CParser.CastExpression_1Context) -> TypedValue:
         # '(' typeName ')' castExpression
         base_type = self.visit(ctx.typeName())
         value = self.convert_type(self.visit(ctx.castExpression()), base_type, ctx)
         return TypedValue(ir_value=value, typ=base_type, constant=False, name=None, lvalue_ptr=False)
 
-    def visitCastExpression_2(self, ctx: CCompilerParser.CastExpression_2Context) -> TypedValue:
+    def visitCastExpression_2(self, ctx: CParser.CastExpression_2Context) -> TypedValue:
         # unaryExpression
 
         return self.visitChildren(ctx)
 
-    def visitMultiplicativeExpression_2(self, ctx: CCompilerParser.MultiplicativeExpression_2Context):
+    def visitMultiplicativeExpression_2(self, ctx: CParser.MultiplicativeExpression_2Context):
         # multiplicativeExpression '*' castExpression
         v1: TypedValue = self.visit(ctx.multiplicativeExpression())
         v2: TypedValue = self.visit(ctx.castExpression())
@@ -1356,7 +1346,7 @@ class Visitor(CCompilerVisitor):
             result = self.builder.mul(new_rvalue1, new_rvalue2)
         return TypedValue(result, new_type, constant=False, name=None, lvalue_ptr=False)
 
-    def visitMultiplicativeExpression_3(self, ctx: CCompilerParser.MultiplicativeExpression_3Context):
+    def visitMultiplicativeExpression_3(self, ctx: CParser.MultiplicativeExpression_3Context):
         # multiplicativeExpression '/' castExpression
         v1: TypedValue = self.visit(ctx.multiplicativeExpression())
         v2: TypedValue = self.visit(ctx.castExpression())
@@ -1369,7 +1359,7 @@ class Visitor(CCompilerVisitor):
             result = self.builder.sdiv(new_rvalue1, new_rvalue2)
         return TypedValue(result, new_type, constant=False, name=None, lvalue_ptr=False)
 
-    def visitMultiplicativeExpression_4(self, ctx: CCompilerParser.MultiplicativeExpression_4Context):
+    def visitMultiplicativeExpression_4(self, ctx: CParser.MultiplicativeExpression_4Context):
         # multiplicativeExpression '%' castExpression
         v1: TypedValue = self.visit(ctx.multiplicativeExpression())
         v2: TypedValue = self.visit(ctx.castExpression())
@@ -1382,7 +1372,7 @@ class Visitor(CCompilerVisitor):
             result = self.builder.srem(new_rvalue1, new_rvalue2)
         return TypedValue(result, new_type, constant=False, name=None, lvalue_ptr=False)
 
-    def visitAdditiveExpression_2(self, ctx: CCompilerParser.AdditiveExpression_2Context):
+    def visitAdditiveExpression_2(self, ctx: CParser.AdditiveExpression_2Context):
         # additiveExpression '+' multiplicativeExpression
         v1: TypedValue = self.visit(ctx.additiveExpression())
         v2: TypedValue = self.visit(ctx.multiplicativeExpression())
@@ -1406,7 +1396,7 @@ class Visitor(CCompilerVisitor):
                 result = self.builder.add(new_rvalue1, new_rvalue2)
         return TypedValue(result, new_type, constant=False, name=None, lvalue_ptr=False)
 
-    def visitAdditiveExpression_3(self, ctx: CCompilerParser.AdditiveExpression_3Context):
+    def visitAdditiveExpression_3(self, ctx: CParser.AdditiveExpression_3Context):
         # additiveExpression '-' multiplicativeExpression
         v1: TypedValue = self.visit(ctx.additiveExpression())
         v2: TypedValue = self.visit(ctx.multiplicativeExpression())
@@ -1431,7 +1421,7 @@ class Visitor(CCompilerVisitor):
                 result = builder.sub(new_rvalue1, new_rvalue2)
         return TypedValue(result, new_type, constant=False, name=None, lvalue_ptr=False)
 
-    def visitShiftExpression_2(self, ctx: CCompilerParser.ShiftExpression_2Context):
+    def visitShiftExpression_2(self, ctx: CParser.ShiftExpression_2Context):
         # shiftExpression '<<' additiveExpression
         v1: TypedValue = self.visit(ctx.shiftExpression())
         v2: TypedValue = self.visit(ctx.additiveExpression())
@@ -1444,7 +1434,7 @@ class Visitor(CCompilerVisitor):
             result = self.builder.shl(new_rvalue1, new_rvalue2)
         return TypedValue(result, new_type, constant=False, name=None, lvalue_ptr=False)
 
-    def visitShiftExpression_3(self, ctx: CCompilerParser.ShiftExpression_3Context):
+    def visitShiftExpression_3(self, ctx: CParser.ShiftExpression_3Context):
         # shiftExpression '>>' additiveExpression
         v1: TypedValue = self.visit(ctx.shiftExpression())
         v2: TypedValue = self.visit(ctx.additiveExpression())
@@ -1470,31 +1460,31 @@ class Visitor(CCompilerVisitor):
             result = self.builder.icmp_signed(op, new_rvalue1, new_rvalue2)
         return TypedValue(result, int1, constant=False, name=None, lvalue_ptr=False)
 
-    def visitRelationalExpression_2(self, ctx: CCompilerParser.RelationalExpression_2Context):
+    def visitRelationalExpression_2(self, ctx: CParser.RelationalExpression_2Context):
         # relationalExpression '<' shiftExpression
         return self._relational_expression('<', ctx)
 
-    def visitRelationalExpression_3(self, ctx: CCompilerParser.RelationalExpression_3Context):
+    def visitRelationalExpression_3(self, ctx: CParser.RelationalExpression_3Context):
         # relationalExpression '>' shiftExpression
         return self._relational_expression('>', ctx)
 
-    def visitRelationalExpression_4(self, ctx: CCompilerParser.RelationalExpression_4Context):
+    def visitRelationalExpression_4(self, ctx: CParser.RelationalExpression_4Context):
         # relationalExpression '<=' shiftExpression
         return self._relational_expression('<=', ctx)
 
-    def visitRelationalExpression_5(self, ctx: CCompilerParser.RelationalExpression_5Context):
+    def visitRelationalExpression_5(self, ctx: CParser.RelationalExpression_5Context):
         # relationalExpression '>=' shiftExpression
         return self._relational_expression('>=', ctx)
 
-    def visitEqualityExpression_2(self, ctx: CCompilerParser.EqualityExpression_2Context):
+    def visitEqualityExpression_2(self, ctx: CParser.EqualityExpression_2Context):
         # equalityExpression '==' relationalExpression
         return self._relational_expression('==', ctx)
 
-    def visitEqualityExpression_3(self, ctx: CCompilerParser.EqualityExpression_3Context):
+    def visitEqualityExpression_3(self, ctx: CParser.EqualityExpression_3Context):
         # equalityExpression '!=' relationalExpression
         return self._relational_expression('!=', ctx)
 
-    def visitAndExpression_2(self, ctx: CCompilerParser.AndExpression_2Context):
+    def visitAndExpression_2(self, ctx: CParser.AndExpression_2Context):
         # andExpression '&' equalityExpression
         v1: TypedValue = self.visit(ctx.andExpression())
         v2: TypedValue = self.visit(ctx.equalityExpression())
@@ -1507,7 +1497,7 @@ class Visitor(CCompilerVisitor):
             result = self.builder.and_(new_rvalue1, new_rvalue2)
         return TypedValue(result, new_type, constant=False, name=None, lvalue_ptr=False)
 
-    def visitExclusiveOrExpression_2(self, ctx: CCompilerParser.ExclusiveOrExpression_2Context):
+    def visitExclusiveOrExpression_2(self, ctx: CParser.ExclusiveOrExpression_2Context):
         # exclusiveOrExpression '^' andExpression
         v1: TypedValue = self.visit(ctx.exclusiveOrExpression())
         v2: TypedValue = self.visit(ctx.andExpression())
@@ -1520,7 +1510,7 @@ class Visitor(CCompilerVisitor):
             result = self.builder.xor(new_rvalue1, new_rvalue2)
         return TypedValue(result, new_type, constant=False, name=None, lvalue_ptr=False)
 
-    def visitInclusiveOrExpression_2(self, ctx: CCompilerParser.InclusiveOrExpression_2Context):
+    def visitInclusiveOrExpression_2(self, ctx: CParser.InclusiveOrExpression_2Context):
         # inclusiveOrExpression '|' exclusiveOrExpression
         v1: TypedValue = self.visit(ctx.inclusiveOrExpression())
         v2: TypedValue = self.visit(ctx.exclusiveOrExpression())
@@ -1533,7 +1523,7 @@ class Visitor(CCompilerVisitor):
             result = self.builder.or_(new_rvalue1, new_rvalue2)
         return TypedValue(result, new_type, constant=False, name=None, lvalue_ptr=False)
 
-    def visitLogicalAndExpression(self, ctx: CCompilerParser.LogicalAndExpressionContext):
+    def visitLogicalAndExpression(self, ctx: CParser.LogicalAndExpressionContext):
         """
         logicalAndExpression
             : inclusiveOrExpression
@@ -1542,7 +1532,7 @@ class Visitor(CCompilerVisitor):
         """
         return self._visitLogicalExpression(ctx)
 
-    def visitLogicalOrExpression(self, ctx: CCompilerParser.LogicalOrExpressionContext):
+    def visitLogicalOrExpression(self, ctx: CParser.LogicalOrExpressionContext):
         """
         logicalOrExpression
             : logicalAndExpression
@@ -1577,7 +1567,7 @@ class Visitor(CCompilerVisitor):
         result.add_incoming(value_rhs, block_rhs)
         return TypedValue(result, int1, constant=False, name=None, lvalue_ptr=False)
 
-    def visitConditionalExpression(self, ctx: CCompilerParser.ConditionalExpressionContext):
+    def visitConditionalExpression(self, ctx: CParser.ConditionalExpressionContext):
         # logicalOrExpression ('?' expression ':' conditionalExpression)?
         first = self.visit(ctx.logicalOrExpression())
         if ctx.getChildCount() == 1:
@@ -1615,7 +1605,7 @@ class Visitor(CCompilerVisitor):
         result.add_incoming(value_false, block_false)
         return TypedValue(result, typed_value_true.type, constant=False, name=None, lvalue_ptr=False)
 
-    def visitAssignmentExpression_2(self, ctx: CCompilerParser.AssignmentExpression_2Context):
+    def visitAssignmentExpression_2(self, ctx: CParser.AssignmentExpression_2Context):
         # unaryExpression assignmentOperator assignmentExpression
         v1: TypedValue = self.visit(ctx.unaryExpression())
         op: str = ctx.assignmentOperator().getText()
@@ -1689,20 +1679,16 @@ class Visitor(CCompilerVisitor):
 
     def save(self, filename: str) -> None:
         """
-        保存分析结果到文件.
-
-        Args:
-            filename (str): 文件名含后缀
-
-        Returns:
-            None
+        保存分析结果到文件
+        :param filename: 文件名含后缀
+        :return: None
         """
         with open(filename, 'w') as f:
             f.write(repr(self.module))
 
 
-def generate(input_file: str, output_file: str, target_arch: str, include_dirs: List[str],
-             macro_list: Dict[str, str]):
+def compile(input_file: str, output_file: str, target_arch: str, include_dirs: List[str],
+             macros: Dict[str, str]):
     """
     将C代码文件转成IR代码文件
     :param input_file: C代码文件
@@ -1719,26 +1705,18 @@ def generate(input_file: str, output_file: str, target_arch: str, include_dirs: 
 
     ir.Type.as_pointer = as_pointer
 
-    includes = [os.getcwd()]
-    includes += include_dirs
-    macros = dict()
-    macros.update(macro_list)
-    for path in ['.', './libc/include', './windows/include']:
-        include_dirs.append(f'./{path}')
-        include_dirs.append(f'./test/{path}')
-    macros = {'_WIN64': None}
+    includes = [os.getcwd(), *include_dirs]
+    macros = macros.copy()
     precessed_text = preprocess(input_file, includes, macros)
-    lexer = CCompilerLexer(InputStream(precessed_text))
+    lexer = CLexer(InputStream(precessed_text))
     stream = CommonTokenStream(lexer)
-    parser = CCompilerParser(stream)
+    parser = CParser(stream)
     parser.removeErrorListeners()
     errorListener = SyntaxErrorListener()
     parser.addErrorListener(errorListener)
 
     tree = parser.compilationUnit()
-    v = Visitor(target_arch)
-    # v.builders.append(None)
-    v.visit(tree)
-    v.save(output_file)
+    visitor = Visitor(target_arch)
+    visitor.visit(tree)
+    visitor.save(output_file)
 
-# del CCompilerParser

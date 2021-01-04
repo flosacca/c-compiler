@@ -19,7 +19,7 @@ void IsGameOver();
 void hidecursor();
 
 typedef enum Direction {
-	NONE, UP,DOWN,LEFT,RIGHT
+    NONE, UP, DOWN, LEFT, RIGHT
 } Direction;
 
 struct Food {

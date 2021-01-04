@@ -3,6 +3,8 @@
 #include <stdlib.h>
 #include <ctype.h>
 
+#define MAXN 100005
+
 double calc(char op, double a, double b) {
     if (op == '+') return a + b;
     if (op == '-') return a - b;
@@ -20,9 +22,9 @@ int comp(char c, char n) {
 
 double eval(const char* expr) {
     int len = strlen(expr);
-    double values[100];
-    char symbols[100];
-    char value_str[100];
+    static double values[MAXN];
+    static char symbols[MAXN];
+    static char value_str[MAXN];
     int n = 0;
     int m = 0;
     int i = 0;

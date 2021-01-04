@@ -152,14 +152,10 @@ cython_debug/
 # antlr generated code
 *.interp
 *.tokens
-**/_cpreprocess/*Lexer.py
-**/_cpreprocess/*Parser.py
-**/_cpreprocess/*Listener.py
-**/_cpreprocess/*Visitor.py
-**/cparser/*Lexer.py
-**/cparser/*Parser.py
-**/cparser/*Listener.py
-**/cparser/*Visitor.py
+**/parser/*Lexer.py
+**/parser/*Parser.py
+**/parser/*Listener.py
+**/parser/*Visitor.py
 
 # temporary test files
 *.[ch]

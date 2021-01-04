@@ -1,9 +1,9 @@
 #include <stdio.h>
 
-#define N 100005
+#define MAXN 100005
 
-char s[N], t[N];
-int f[N];
+char s[MAXN], t[MAXN];
+int f[MAXN];
 
 int main() {
     printf("Input text: ");

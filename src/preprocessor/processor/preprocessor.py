@@ -5,11 +5,11 @@ import os
 import platform
 import re
 
-from _cpreprocess.CPreprocessorListener import CPreprocessorListener
-from _cpreprocess.CPreprocessorParser import CPreprocessorParser
-from _cpreprocess.CPreprocessorLexer import CPreprocessorLexer
+from preprocessor.parser.CPreprocessorListener import CPreprocessorListener
+from preprocessor.parser.CPreprocessorParser import CPreprocessorParser
+from preprocessor.parser.CPreprocessorLexer import CPreprocessorLexer
 
-from cpreprocess.errorlistener import MacroError
+from .errorlistener import MacroError
 
 from typing import Dict, List, Any, Optional, Tuple
 

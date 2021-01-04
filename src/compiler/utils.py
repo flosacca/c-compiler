@@ -10,10 +10,3 @@ class Result(Generic[T]):
         self.value = value
         self.message = message
 
-
-def success_result(value: Generic[T]) -> Result[T]:
-    return Result[T](True, value=value, message=None)
-
-
-def failure_result(message: str) -> Result[T]:
-    return Result[T](False, value=None, message=message)

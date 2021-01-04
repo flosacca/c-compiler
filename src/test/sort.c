@@ -1,6 +1,6 @@
 #include <stdio.h>
 
-#define N 100005
+#define MAXN 100005
 
 void swap(int* a, int* b) {
     int v = *a;
@@ -21,14 +21,14 @@ void quick_sort(int* a, int n) {
             if (a[--j] <= v) break;
         if (i >= j)
             break;
-        swap(&a[i], &a[j]);
+        swap(a + i, a + j);
     }
     int m = j + 1;
     quick_sort(a, m);
-    quick_sort(&a[m], n - m);
+    quick_sort(a + m, n - m);
 }
 
-int a[N];
+int a[MAXN];
 
 int main() {
     int n = 0;
