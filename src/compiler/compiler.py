@@ -5,7 +5,7 @@ import re
 import os
 from typing import Dict, List, Union, Optional, Tuple, Any
 
-from .error_listener import SemanticError, SyntaxErrorListener
+from .errors import CompilationError, SemanticError, ParserErrorListener
 from .symbol_table import SymbolTable
 from .values import TypedValue, const_value, ElementNamedLiteralStructType
 from .elements import ParameterList, DeclarationSpecifiers
@@ -13,6 +13,7 @@ from .parser.CLexer import CLexer
 from .parser.CParser import CParser
 from .parser.CVisitor import CVisitor
 from preprocessor import preprocess
+from preprocessor.errors import MacroError
 
 double = ir.DoubleType()
 int1 = ir.IntType(1)
@@ -108,9 +109,9 @@ class Visitor(CVisitor):
             if parameter_list.calling_convention and parameter_list.calling_convention != llvm_function.calling_convention:
                 raise SemanticError("Calling convention not identical: "
                                     f"previous {llvm_function.calling_convention} "
-                                    f"new {parameter_list.calling_convention}")
+                                    f"new {parameter_list.calling_convention}", ctx)
             if len(llvm_function.blocks) > 0:
-                raise SemanticError(ctx=ctx, msg='函数重定义: ' + function_name)
+                raise SemanticError('函数重定义: ' + function_name, ctx)
         else:
             llvm_function = ir.Function(self.module, function_type, name=function_name)
             result = self.symbol_table.add_item(function_name, TypedValue(ir_value=llvm_function,
@@ -148,7 +149,7 @@ class Visitor(CVisitor):
                                                                           lvalue_ptr=True,
                                                                           name=parameter_list[i][1]))
             if not result.success:
-                raise SemanticError(ctx=ctx, msg=result.message)
+                raise SemanticError(result.message, ctx)
 
         # 处理函数体
         self.visit(ctx.compoundStatement())  # funcBody
@@ -390,7 +391,7 @@ class Visitor(CVisitor):
                                                                           lvalue_ptr=True))
                         if specifiers.is_extern():
                             if initializer is not None:
-                                raise SemanticError("External variable cannot be initialized.")
+                                raise SemanticError("External variable cannot be initialized.", ctx)
                         else:
                             if specifiers.is_static():
                                 variable.linkage = "internal"
@@ -416,7 +417,7 @@ class Visitor(CVisitor):
                         if not isinstance(initializer, TypedValue):
                             value = self.create_initializer_list(typ, initializer, True)
                         else:
-                            value = self.convert_type(initializer, typ)
+                            value = self.convert_type(initializer, typ, ctx=ctx)
                         self.builder.store(value, variable)
 
     def visitInitializerList(self, ctx: CParser.InitializerListContext) -> List[Union[TypedValue, list]]:
@@ -619,13 +620,13 @@ class Visitor(CVisitor):
                 current += 1
             item = self.symbol_table.get_item(identifier)
             if item is not None:
-                raise SemanticError("Symbol redefined: " + identifier)
+                raise SemanticError("Symbol redefined: " + identifier, ctx)
             self.symbol_table.add_item(identifier, size_t)
             return size_t
         else:
             item = self.symbol_table.get_item(identifier)
             if item is None:
-                raise SemanticError("Undefined identifier: " + identifier)
+                raise SemanticError("Undefined identifier: " + identifier, ctx)
             return item
 
     def visitEnumeratorList(self, ctx: CParser.EnumeratorListContext) -> List[
@@ -785,7 +786,7 @@ class Visitor(CVisitor):
             identifier = f'struct {identifier_ctx.getText()}'
             item = self.symbol_table.get_item(identifier)
             if item is not None:
-                raise SemanticError("Symbol redefined: " + identifier)
+                raise SemanticError("Symbol redefined: " + identifier, ctx)
         else:
             identifier = None
         struct_member_list = self.visit(ctx.structDeclarationList())
@@ -801,7 +802,7 @@ class Visitor(CVisitor):
         identifier = f'struct {ctx.Identifier().getText()}'
         item = self.symbol_table.get_item(identifier)
         if item is None:
-            raise SemanticError("Undefined identifier: " + identifier)
+            raise SemanticError("Undefined identifier: " + identifier, ctx)
         return item
 
     def visitStructDeclarationList(self, ctx: CParser.StructDeclarationListContext) -> List[
@@ -831,7 +832,7 @@ class Visitor(CVisitor):
         for decl in decl_list:
             identifier, typ, parameter_list = decl(base_type, specifiers)
             if specifiers.is_typedef():
-                raise SemanticError("Illegal typedef here")
+                raise SemanticError("Illegal typedef here", ctx)
             member_list.append((typ, identifier))
         return member_list
 
@@ -948,7 +949,7 @@ class Visitor(CVisitor):
             new_v2 = self.builder.sext(value2, new_type)
             return new_v1, new_v2, new_type
 
-        raise SemanticError('Bit extend error.', ctx=ctx)
+        raise SemanticError('Bit extend error.', ctx)
 
     def decay(self, value: TypedValue, ctx=None) -> TypedValue:
         if not isinstance(value.type, ir.ArrayType):
@@ -969,7 +970,7 @@ class Visitor(CVisitor):
             element_type = target_type.element
             array_elements = []
             if len(initializer_list) > target_type.count:
-                raise SemanticError("Invalid initializer: element count not match")
+                raise SemanticError("Invalid initializer: element count not match", ctx)
             for initializer in initializer_list:
                 array_elements.append(self.create_initializer_list(element_type, initializer, need_constant))
             if len(initializer_list) < target_type.count:
@@ -980,7 +981,7 @@ class Visitor(CVisitor):
         elif isinstance(target_type, ElementNamedLiteralStructType):
             # 创建 struct
             if len(initializer_list) > len(target_type.elements):
-                raise SemanticError("Invalid initializer: element count not match")
+                raise SemanticError("Invalid initializer: element count not match", ctx)
             struct_elements = []
             for i in range(len(initializer_list)):
                 element_type = target_type.elements[i]
@@ -993,7 +994,7 @@ class Visitor(CVisitor):
         else:
             # 非聚合类型
             if not isinstance(initializer_list, TypedValue):
-                raise SemanticError("Cannot initialize a non aggregate element with an aggregate literal.")
+                raise SemanticError("Cannot initialize a non aggregate element with an aggregate literal.", ctx)
             if initializer_list.constant:
                 if need_constant:
                     assert isinstance(initializer_list.ir_value, ir.Constant)
@@ -1005,9 +1006,9 @@ class Visitor(CVisitor):
                     return self.load_lvalue(initializer_list)
             else:
                 if need_constant:
-                    raise SemanticError("Constant value required for constant initializer.")
+                    raise SemanticError("Constant value required for constant initializer.", ctx)
                 else:
-                    return self.convert_type(initializer_list, target_type)
+                    return self.convert_type(initializer_list, target_type, ctx=ctx)
 
     def convert_type(self, value: TypedValue, type: ir.Type, ctx=None) -> ir.Value:
         """
@@ -1036,36 +1037,36 @@ class Visitor(CVisitor):
             elif type.is_pointer:
                 return self.builder.inttoptr(ir_value, type)
             else:
-                raise SemanticError('Not supported type conversion.', ctx=ctx)
+                raise SemanticError('Not supported type conversion.', ctx)
         elif value.type == double:
             if type in int_types:
                 return self.builder.fptosi(ir_value, type)
             elif type == double:
                 return value.ir_value
             elif type.is_pointer:
-                raise SemanticError('Illegal type conversion.', ctx=ctx)
+                raise SemanticError('Illegal type conversion.', ctx)
             else:
-                raise SemanticError('Not supported type conversion.', ctx=ctx)
+                raise SemanticError('Not supported type conversion.', ctx)
         elif value.type.is_pointer:
             if type in int_types:
                 return self.builder.ptrtoint(ir_value, type)
             elif type == double:
-                raise SemanticError('Illegal type conversion.', ctx=ctx)
+                raise SemanticError('Illegal type conversion.', ctx)
             elif type.is_pointer:
                 return self.builder.bitcast(ir_value, type)
             else:
-                raise SemanticError('Not supported type conversion.', ctx=ctx)
+                raise SemanticError('Not supported type conversion.', ctx)
         elif isinstance(value.type, ir.ArrayType):
             if type.is_pointer:
                 type: ir.PointerType
                 value_type: ir.ArrayType = value.type
                 if type.pointee != value_type.element:
-                    raise SemanticError(f'Invalid conversion from {value_type} to {type}.', ctx=ctx)
+                    raise SemanticError(f'Invalid conversion from {value_type} to {type}.', ctx)
                 return self.builder.gep(ir_value, [int32_zero, int32_zero], inbounds=False)
             else:
-                raise SemanticError('Not supported type conversion.', ctx=ctx)
+                raise SemanticError('Not supported type conversion.', ctx)
         else:
-            raise SemanticError('Not supported type conversion.', ctx=ctx)
+            raise SemanticError('Not supported type conversion.', ctx)
 
     @staticmethod
     def unescape(s: str) -> str:
@@ -1096,7 +1097,7 @@ class Visitor(CVisitor):
             identifier = ctx.getText()
             item = self.symbol_table.get_item(identifier)
             if item is None:
-                raise SemanticError("Undefined identifier: " + identifier)
+                raise SemanticError("Undefined identifier: " + identifier, ctx)
             return item
         if ctx.StringLiteral():
             str_result = ""
@@ -1121,7 +1122,7 @@ class Visitor(CVisitor):
         is_pointer = isinstance(v1.type, ir.types.PointerType)
         is_array = isinstance(v1.type, ir.types.ArrayType)
         if not is_array and not is_pointer:
-            raise SemanticError("Postfix Expression is not a array or pointer.", ctx=ctx)
+            raise SemanticError("Postfix Expression is not a array or pointer.", ctx)
         v2: TypedValue = self.visit(ctx.getChild(2))
         # 数组地址
         base_ptr = self.load_lvalue(v1)
@@ -1135,7 +1136,7 @@ class Visitor(CVisitor):
             result = self.builder.gep(base_ptr, [int32_zero, offset], inbounds=True)
             result_type = v1.type.element
         else:
-            raise SemanticError("Postfix expression(#2) is not a array or pointer.", ctx=ctx)
+            raise SemanticError("Postfix expression(#2) is not a array or pointer.", ctx)
         return TypedValue(result, result_type, constant=False, name=None, lvalue_ptr=True)
 
     def visitPostfixExpression_3(self, ctx: CParser.PostfixExpression_3Context) -> TypedValue:
@@ -1143,10 +1144,10 @@ class Visitor(CVisitor):
         # 函数调用
         func_value: TypedValue = self.visit(ctx.postfixExpression())
         if func_value is None:
-            raise SemanticError('Function not declared')
+            raise SemanticError('Function not declared', ctx)
         func_pointer = self.load_lvalue(func_value)
         if not func_pointer.type.is_pointer:
-            raise SemanticError('Invalid function.')
+            raise SemanticError('Invalid function.', ctx)
         func_type: ir.FunctionType = func_pointer.type.pointee
         if ctx.argumentExpressionList():
             argument_expressions = self.visit(ctx.argumentExpressionList())
@@ -1156,18 +1157,18 @@ class Visitor(CVisitor):
         func_arg_count = len(func_type.args)
         if func_type.var_arg:
             if len(argument_expressions) < func_arg_count:
-                raise SemanticError("Too few arguments")
+                raise SemanticError("Too few arguments", ctx)
         else:
             if len(argument_expressions) != func_arg_count:
-                raise SemanticError("Incorrect number of arguments")
+                raise SemanticError("Incorrect number of arguments", ctx)
         for i in range(len(argument_expressions)):
             if i < func_arg_count:
-                func_args.append(self.convert_type(argument_expressions[i], func_type.args[i], ctx))
+                func_args.append(self.convert_type(argument_expressions[i], func_type.args[i], ctx=ctx))
             else:
                 if isinstance(argument_expressions[i].type, ir.ArrayType):
                     func_args.append(self.convert_type(argument_expressions[i],
                                                        argument_expressions[i].type.element.as_pointer(),
-                                                       ctx))
+                                                       ctx=ctx))
                 else:
                     func_args.append(self.load_lvalue(argument_expressions[i]))
         ret_value = self.builder.call(func_pointer, func_args)
@@ -1177,17 +1178,17 @@ class Visitor(CVisitor):
         # postfixExpression '.' Identifier
         v1: TypedValue = self.visit(ctx.getChild(0))
         if not v1.lvalue_ptr:
-            raise SemanticError('Postfix Expression(#2) needs lvalue.', ctx=ctx)
+            raise SemanticError('Postfix Expression(#2) needs lvalue.', ctx)
         rvalue: ir.NamedValue = self.load_lvalue(v1)
         if not isinstance(rvalue.type, ElementNamedLiteralStructType):
-            raise SemanticError("Postfix expression(#4) is not literal struct.", ctx=ctx)
+            raise SemanticError("Postfix expression(#4) is not literal struct.", ctx)
         member_name = ctx.Identifier().getText()
         ls_type: ElementNamedLiteralStructType = rvalue.type
         try:
             member_index = ls_type.index(member_name)
             member_type = ls_type.elements[member_index]
         except ValueError:
-            raise SemanticError("Postfix expression(#4) has not such attribute.", ctx=ctx)
+            raise SemanticError("Postfix expression(#4) has not such attribute.", ctx)
         # 获得地址
         result = self.builder.gep(v1.ir_value, [int32_zero, ir.Constant(int32, member_index)], inbounds=False)
         return TypedValue(result, member_type, constant=False, name=None, lvalue_ptr=True)
@@ -1197,7 +1198,7 @@ class Visitor(CVisitor):
         v1: TypedValue = self.visit(ctx.getChild(0))
         rvalue: ir.NamedValue = self.load_lvalue(v1)  # 这里事实上获得一个指针
         if not isinstance(rvalue.type, ir.types.PointerType):
-            raise SemanticError("Postfix expression(#5) is not pointer.", ctx=ctx)
+            raise SemanticError("Postfix expression(#5) is not pointer.", ctx)
         # 转到结构体类型
         pointee_type = v1.type.pointee
         member_name = ctx.Identifier().getText()
@@ -1206,7 +1207,7 @@ class Visitor(CVisitor):
             member_index = ls_type.index(member_name)
             member_type = ls_type.elements[member_index]
         except ValueError:
-            raise SemanticError("Postfix expression(#5) has not such attribute.", ctx=ctx)
+            raise SemanticError("Postfix expression(#5) has not such attribute.", ctx)
         # 获得地址
         result = self.builder.gep(rvalue, [int32_zero, ir.Constant(int32, member_index)], inbounds=False)
         return TypedValue(result, member_type, constant=False, name=None, lvalue_ptr=True)
@@ -1284,12 +1285,12 @@ class Visitor(CVisitor):
         if op == '&':
             # 必须对左值取地址
             if not v2.lvalue_ptr:
-                raise SemanticError('Operator & needs a lvalue.', ctx=ctx)
+                raise SemanticError('Operator & needs a lvalue.', ctx)
             return TypedValue(v2.ir_value, v2.type.as_pointer(), constant=False, name=None, lvalue_ptr=False)
         elif op == '*':
             pointer_type: ir.PointerType = v2.type
             if not pointer_type.is_pointer:
-                raise SemanticError('Operator * needs a pointer.', ctx=ctx)
+                raise SemanticError('Operator * needs a pointer.', ctx)
             if v2.lvalue_ptr:
                 # v2 是存放指针类型的左值时
                 ptr_value = self.load_lvalue(v2)
@@ -1330,7 +1331,7 @@ class Visitor(CVisitor):
     def visitCastExpression_1(self, ctx: CParser.CastExpression_1Context) -> TypedValue:
         # '(' typeName ')' castExpression
         base_type = self.visit(ctx.typeName())
-        value = self.convert_type(self.visit(ctx.castExpression()), base_type, ctx)
+        value = self.convert_type(self.visit(ctx.castExpression()), base_type, ctx=ctx)
         return TypedValue(ir_value=value, typ=base_type, constant=False, name=None, lvalue_ptr=False)
 
     def visitCastExpression_2(self, ctx: CParser.CastExpression_2Context) -> TypedValue:
@@ -1434,7 +1435,7 @@ class Visitor(CVisitor):
         rvalue2 = self.load_lvalue(v2)
         new_rvalue1, new_rvalue2, new_type = self.bit_extend(rvalue1, rvalue2, ctx)
         if new_type == double:
-            raise SemanticError('Bitwise shifting is only available to integer.')
+            raise SemanticError('Bitwise shifting is only available to integer.', ctx)
         else:
             result = self.builder.shl(new_rvalue1, new_rvalue2)
         return TypedValue(result, new_type, constant=False, name=None, lvalue_ptr=False)
@@ -1447,7 +1448,7 @@ class Visitor(CVisitor):
         rvalue2 = self.load_lvalue(v2)
         new_rvalue1, new_rvalue2, new_type = self.bit_extend(rvalue1, rvalue2, ctx)
         if new_type == double:
-            raise SemanticError('Bitwise shifting is only available to integer.')
+            raise SemanticError('Bitwise shifting is only available to integer.', ctx)
         else:
             result = self.builder.ashr(new_rvalue1, new_rvalue2)
         return TypedValue(result, new_type, constant=False, name=None, lvalue_ptr=False)
@@ -1497,7 +1498,7 @@ class Visitor(CVisitor):
         rvalue2 = self.load_lvalue(v2)
         new_rvalue1, new_rvalue2, new_type = self.bit_extend(rvalue1, rvalue2, ctx)
         if new_type == double:
-            raise SemanticError('Bitwise operation is only available to integer.')
+            raise SemanticError('Bitwise operation is only available to integer.', ctx)
         else:
             result = self.builder.and_(new_rvalue1, new_rvalue2)
         return TypedValue(result, new_type, constant=False, name=None, lvalue_ptr=False)
@@ -1510,7 +1511,7 @@ class Visitor(CVisitor):
         rvalue2 = self.load_lvalue(v2)
         new_rvalue1, new_rvalue2, new_type = self.bit_extend(rvalue1, rvalue2, ctx)
         if new_type == double:
-            raise SemanticError('Bitwise operation is only available to integer.')
+            raise SemanticError('Bitwise operation is only available to integer.', ctx)
         else:
             result = self.builder.xor(new_rvalue1, new_rvalue2)
         return TypedValue(result, new_type, constant=False, name=None, lvalue_ptr=False)
@@ -1523,7 +1524,7 @@ class Visitor(CVisitor):
         rvalue2 = self.load_lvalue(v2)
         new_rvalue1, new_rvalue2, new_type = self.bit_extend(rvalue1, rvalue2, ctx)
         if new_type == double:
-            raise SemanticError('Bitwise operation is only available to integer.')
+            raise SemanticError('Bitwise operation is only available to integer.', ctx)
         else:
             result = self.builder.or_(new_rvalue1, new_rvalue2)
         return TypedValue(result, new_type, constant=False, name=None, lvalue_ptr=False)
@@ -1617,7 +1618,7 @@ class Visitor(CVisitor):
         v3: TypedValue = self.visit(ctx.assignmentExpression())
         # lhs 必须为左值
         if not v1.lvalue_ptr:
-            raise SemanticError('Assignment needs a lvalue at left.', ctx=ctx)
+            raise SemanticError('Assignment needs a lvalue at left.', ctx)
         rvalue1 = self.load_lvalue(v1)
         rvalue3 = self.load_lvalue(v3)
         builder = self.builder
@@ -1657,27 +1658,27 @@ class Visitor(CVisitor):
         elif op == '<<=':
             tmp = self.convert_type(v3, v1.type, ctx=ctx)
             if v1.type == double:
-                raise SemanticError('Floating point number cannot shift bits.')
+                raise SemanticError('Floating point number cannot shift bits.', ctx)
             result = self.builder.shl(rvalue1, tmp)
         elif op == '>>=':
             tmp = self.convert_type(v3, v1.type, ctx=ctx)
             if v1.type == double:
-                raise SemanticError('Floating point number cannot shift bits.')
+                raise SemanticError('Floating point number cannot shift bits.', ctx)
             result = self.builder.ashr(rvalue1, tmp)
         elif op == '&=':
             tmp = self.convert_type(v3, v1.type, ctx=ctx)
             if v1.type == double:
-                raise SemanticError('Floating point number cannot shift bits.')
+                raise SemanticError('Floating point number cannot shift bits.', ctx)
             result = self.builder.and_(rvalue1, tmp)
         elif op == '^=':
             tmp = self.convert_type(v3, v1.type, ctx=ctx)
             if v1.type == double:
-                raise SemanticError('Floating point number cannot shift bits.')
+                raise SemanticError('Floating point number cannot shift bits.', ctx)
             result = self.builder.xor(rvalue1, tmp)
         else:  # op == '|='
             tmp = self.convert_type(v3, v1.type, ctx=ctx)
             if v1.type == double:
-                raise SemanticError('Floating point number cannot shift bits.')
+                raise SemanticError('Floating point number cannot shift bits.', ctx)
             result = self.builder.or_(rvalue1, tmp)
         self.store_lvalue(result, v1)
         return
@@ -1712,16 +1713,31 @@ def compile(input_file: str, output_file: str, target_arch: str, include_dirs: L
 
     includes = [os.getcwd(), *include_dirs]
     macros = macros.copy()
-    precessed_text = preprocess(input_file, includes, macros)
-    lexer = CLexer(InputStream(precessed_text))
+
+    try:
+        processed_text = preprocess(input_file, includes, macros)
+    except MacroError as e:
+        print(str(e))
+        return False
+
+    processed_lines = processed_text.splitlines()
+    lexer = CLexer(InputStream(processed_text))
     stream = CommonTokenStream(lexer)
     parser = CParser(stream)
     parser.removeErrorListeners()
-    errorListener = SyntaxErrorListener()
+    errorListener = ParserErrorListener()
     parser.addErrorListener(errorListener)
 
-    tree = parser.compilationUnit()
-    visitor = Visitor(target_arch)
-    visitor.visit(tree)
-    visitor.save(output_file)
+    try:
+        tree = parser.compilationUnit()
+        visitor = Visitor(target_arch)
+        visitor.visit(tree)
+    except CompilationError as e:
+        print(str(e))
+        i = e.line - 1
+        if i in range(len(processed_lines)):
+            print(processed_lines[i])
+        return False
 
+    visitor.save(output_file)
+    return True

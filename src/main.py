@@ -51,4 +51,5 @@ if __name__ == '__main__':
             if len(l) > 1:
                 macro_value = '='.join(l[1:])
                 pass_args['macros'][macro_name] = macro_value
-    compiler.compile(**pass_args)
+    if not compiler.compile(**pass_args):
+        sys.exit(1)

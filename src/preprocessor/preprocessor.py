@@ -9,7 +9,7 @@ from preprocessor.parser.CPreprocessorListener import CPreprocessorListener
 from preprocessor.parser.CPreprocessorParser import CPreprocessorParser
 from preprocessor.parser.CPreprocessorLexer import CPreprocessorLexer
 
-from .errorlistener import MacroError
+from .errors import MacroError
 
 from typing import Dict, List, Any, Optional, Tuple
 
