@@ -1067,6 +1067,10 @@ class Visitor(CVisitor):
         else:
             raise SemanticError('Not supported type conversion.', ctx=ctx)
 
+    @staticmethod
+    def unescape(s: str) -> str:
+        return s.encode('utf-8').decode('unicode_escape')
+
     def visitConstant(self, ctx: CParser.ConstantContext) -> TypedValue:
         text = ctx.getText()
         if ctx.IntegerConstant():
@@ -1078,7 +1082,10 @@ class Visitor(CVisitor):
         if ctx.FloatingConstant():
             return const_value(ir.Constant(double, float(text)))
         if ctx.CharacterConstant():
-            return const_value(ir.Constant(int8, ord(text[1])))
+            c = self.unescape(text[1:-1])
+            if len(c) != 1:
+                raise SemanticError('multi-character character constant is not supported', ctx)
+            return const_value(ir.Constant(int8, ord(c)))
         raise SemanticError('impossible')
 
     def visitPrimaryExpression(self, ctx: CParser.PrimaryExpressionContext) -> TypedValue:
@@ -1094,7 +1101,7 @@ class Visitor(CVisitor):
         if ctx.StringLiteral():
             str_result = ""
             for childCtx in ctx.StringLiteral():
-                str_result += childCtx.getText()[1:-1].encode('utf-8').decode('unicode_escape')
+                str_result += self.unescape(childCtx.getText()[1:-1])
             return self.str_constant(str_result)
         if ctx.constant():
             return self.visit(ctx.constant())

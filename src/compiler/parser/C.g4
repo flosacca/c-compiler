@@ -337,7 +337,7 @@ IntegerConstant
 
 FloatingConstant : Digit+ '.' Digit+ ;
 
-CharacterConstant : '\'' . '\'' ;
+CharacterConstant : '\'' CChar '\'' ;
 
 StringLiteral : '"' SChar* '"' ;
 
@@ -375,6 +375,12 @@ OctalEscapeSequence
 fragment
 HexadecimalEscapeSequence
     : '\\x' HexadecimalDigit+
+    ;
+
+fragment
+CChar
+    : ~['\\\r\n]
+    | EscapeSequence
     ;
 
 fragment
