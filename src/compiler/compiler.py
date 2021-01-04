@@ -3,17 +3,15 @@ from llvmlite import ir, binding
 
 import re
 import os
-import sys
-from typing import Dict, List, Union, Optional, Tuple, Any, Type
+from typing import Dict, List, Union, Optional, Tuple, Any
 
 from .error_listener import SemanticError, SyntaxErrorListener
 from .symbol_table import SymbolTable
 from .values import TypedValue, const_value, ElementNamedLiteralStructType
 from .elements import ParameterList, DeclarationSpecifiers
-from .utils import Result
-from parser.CLexer import CLexer
-from parser.CParser import CParser
-from parser.CVisitor import CVisitor
+from .parser.CLexer import CLexer
+from .parser.CParser import CParser
+from .parser.CVisitor import CVisitor
 from preprocessor import preprocess
 
 double = ir.DoubleType()
