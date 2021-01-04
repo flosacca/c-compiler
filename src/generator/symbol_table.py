@@ -58,6 +58,12 @@ class DeclarationSpecifiers:
     def is_static(self):
         return ("storage", "static") in self.specifiers
 
+    def is_extern(self):
+        for (typ, val) in self.specifiers:
+            if typ == "storage" and val == "extern":
+                return True
+        return False
+
 
 class ParameterList:
 
