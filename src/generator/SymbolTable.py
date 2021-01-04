@@ -44,16 +44,13 @@ class DeclarationSpecifiers:
         return None
 
     def is_typedef(self):
-        for (typ, val) in self.specifiers:
-            if typ == "storage" and val == "typedef":
-                return True
-        return False
+        return ("storage", "typedef") in self.specifiers
 
     def is_extern(self):
-        for (typ, val) in self.specifiers:
-            if typ == "storage" and val == "extern":
-                return True
-        return False
+        return ("storage", "extern") in self.specifiers
+
+    def is_static(self):
+        return ("storage", "static") in self.specifiers
 
 
 class ParameterList:

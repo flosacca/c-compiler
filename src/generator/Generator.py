@@ -397,12 +397,19 @@ class Visitor(CCompilerVisitor):
                             if initializer is not None:
                                 raise SemanticError("External variable cannot be initialized.")
                         else:
+                            if specifiers.is_static():
+                                variable.linkage = "internal"
                             if initializer is not None:
                                 variable.initializer = self.create_initializer_list(typ, initializer, True)
                             else:
                                 variable.initializer = ir.Constant(typ, None)
                 else:
-                    variable = ir.IRBuilder(self.current_function.blocks[0]).alloca(typ, 1)
+                    if specifiers.is_static():
+                        variable = ir.GlobalVariable(self.module, typ, f"{self.current_function.name}.{identifier}")
+                        variable.initializer = ir.Constant(typ, None)
+                        variable.linkage = "internal"
+                    else:
+                        variable = ir.IRBuilder(self.current_function.blocks[0]).alloca(typ, 1)
                     result = self.symbol_table.add_item(identifier, TypedValue(ir_value=variable,
                                                                                typ=typ,
                                                                                constant=False,

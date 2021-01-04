@@ -231,6 +231,7 @@ declarationSpecifier
 storageClassSpecifier
     : 'typedef'
     | 'extern'
+    | 'static'
     ;
 
 functionSpecifier
