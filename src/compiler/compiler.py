@@ -1412,10 +1412,7 @@ class Visitor(CVisitor):
             v2 = self.decay(v2)
         rvalue1 = self.load_lvalue(v1)
         rvalue2 = self.load_lvalue(v2)
-        if v2.type.is_pointer and v1.type in int_types:
-            result = self.builder.gep(rvalue2, [self.builder.neg(rvalue1)], inbounds=False)
-            new_type = v2.type
-        elif v1.type.is_pointer and v2.type in int_types:
+        if v1.type.is_pointer and v2.type in int_types:
             result = self.builder.gep(rvalue1, [self.builder.neg(rvalue2)], inbounds=False)
             new_type = v1.type
         else:

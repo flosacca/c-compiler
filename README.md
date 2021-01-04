@@ -1,4 +1,5 @@
-# c-compiler
+# C 转 LLVM 编译器使用说明
+
 Compile C to LLVM with Python.
 
 ## 部署方法
@@ -27,12 +28,13 @@ call <root_dir>/bin/antlr4env.bat
 
 之后生成本项目的 antlr 框架：
 ```shell script
-antlr4py3 -visitor Parser/CCompiler.g4
+antlr4py3 -visitor compiler/parser/C.g4 -o compiler/parser/
+antlr4py3 -visitor preprocessor/parser/CPreprocessor.g4 -o preprocessor/parser/
 ```
 
 ## 使用方法
 
-编译到 LLVM IR:
+编译到 LLVM IR
 ```text
 Usage: python3 main.py [-h] [-o output_name] [-t target] [-I include_dirs] [-D<macro<=value>>] filename
         -h, --help: 语法帮助
@@ -41,11 +43,12 @@ Usage: python3 main.py [-h] [-o output_name] [-t target] [-I include_dirs] [-D<m
         -I, --include=: 头文件搜寻目录，允许多个
         -D<macro<=value>>: 定义宏 macro，值设为 value，允许定义多个宏
 ```
+示例
 ```shell script
-python3 main.py -o snake.ll -Itest/libc/include -Itest/windows/include -D_WIN64 test/snake.c
+python3 main.py -o snake.ll -Itest/libc/include -Itest/windows/include -t x86_64-pc-windows-gnu -D_WIN64 test/snake.c
 ```
 
 LLVM IR 编译到二进制文件 (示例: clang)
 ```shell script
-clang snake.ll -o snake
+clang snake.ll -o snake.exe
 ```
