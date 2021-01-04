@@ -32,12 +32,20 @@ antlr4py3 -visitor Parser/CCompiler.g4
 
 ## 使用方法
 
-单文件编译：
+编译到 LLVM IR:
+```text
+Usage: python3 main.py [-h] [-o output_name] [-t target] [-I include_dirs] [-D<macro<=value>>] filename
+        -h, --help: 语法帮助
+        -o, --output=: 输出的文件名
+        -t, --target=: LLVM IR 目标平台架构，默认为 x86_64-pc-linux-gnu
+        -I, --include=: 头文件搜寻目录，允许多个
+        -D<macro<=value>>: 定义宏 macro，值设为 value，允许定义多个宏
+```
 ```shell script
-python3 main.py test/<某个文件>.c
+python3 main.py -o snake.ll -Itest/libc/include -Itest/windows/include -D_WIN64 test/snake.c
 ```
 
-`test/` 文件夹下全体 *.c 文件编译：
+LLVM IR 编译到二进制文件 (示例: clang)
 ```shell script
-python3 compile_all.py
+clang snake.ll -o snake
 ```

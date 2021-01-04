@@ -3,6 +3,10 @@
 
 #include <stddef.h>
 
+#define stdin   (&_iob[STDIN_FILENO])
+#define stdout  (&_iob[STDOUT_FILENO])
+#define stderr  (&_iob[STDERR_FILENO])
+
 #define STDIN_FILENO	0
 #define STDOUT_FILENO	1
 #define STDERR_FILENO	2

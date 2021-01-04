@@ -20,6 +20,17 @@ int comp(char c, char n) {
     return c == '*' || c == '/';
 }
 
+void remove_blank(char* str) {
+    char* t = str;
+    while (*str) {
+        if (!isblank(*str)) {
+            *t++ = *str;
+        }
+        ++str;
+    }
+    *t = 0;
+}
+
 double eval(const char* expr) {
     int len = strlen(expr);
     static double values[MAXN];
@@ -58,7 +69,8 @@ double eval(const char* expr) {
 }
 
 int main() {
-    char expr[1000];
-    scanf("%s", expr);
+    static char expr[MAXN];
+    fgets(expr, MAXN, stdin);
+    remove_blank(expr);
     printf("%f\n", eval(expr));
 }

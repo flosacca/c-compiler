@@ -1,4 +1,3 @@
-#define _CRT_SECURE_NO_WARNINGS
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -21,7 +20,7 @@ void printWinner(int winner) {
 void resetGame() {
     for (int i = 0; i < 3; ++i) {
         int j = 3;
-        while (--j) {
+        while (j--) {
             game.board.blocks[i][j] = 0;
         }
     }
@@ -97,7 +96,7 @@ int main() {
             running = runGame();
         printf("Another round? y/n: ");
         scanf("%s", flag);
-        if (flag[0] != 's')
+        if (flag[0] != 'y')
             break;
     }
     int a[20];
