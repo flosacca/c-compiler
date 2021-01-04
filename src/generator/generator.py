@@ -6,9 +6,9 @@ import os
 import sys
 from typing import Dict, List, Union, Optional, Tuple, Any, Type
 
-from generator.ErrorListener import SemanticError
-from generator.ErrorListener import SyntaxErrorListener
-from generator.SymbolTable import SymbolTable, Structure, TypedValue, const_value, ParameterList, DeclarationSpecifiers, \
+from generator.error_listener import SemanticError
+from generator.error_listener import SyntaxErrorListener
+from generator.symbol_table import SymbolTable, TypedValue, const_value, ParameterList, DeclarationSpecifiers, \
     ElementNamedLiteralStructType
 from cparser.CCompilerLexer import CCompilerLexer
 from cparser.CCompilerParser import CCompilerParser
@@ -59,11 +59,8 @@ class Visitor(CCompilerVisitor):
         # 函数列表 Dict[名称, 是否有定义]
         self.functions: Dict[str, ir.Function] = dict()
 
-        # 结构体列表
-        self.structure: Structure = Structure()
-
         # 当前所在函数名
-        self.current_function: ir.Function = None
+        self.current_function: Optional[ir.Function] = None
         self.constants = 0
 
         # 符号表

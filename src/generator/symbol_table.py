@@ -2,11 +2,17 @@ from typing import Dict, List, Union, Optional, Tuple
 
 from llvmlite import ir
 
-from generator.Constants import Constants
-from generator.parser_util import Result, success_result
+from generator.parser_util import Result
 
 
 class DeclarationSpecifiers:
+    """
+    对应文法中的 declarationSpecifiers，表示能够作用在 declarator 上的各种修饰符，包括:
+     - typeSpecifier            : int | double | ...        (存储为 ir.Type)
+     - typeQualifier            : const                     (存储为 str)
+     - storageClassQualifier    : extern | static           (存储为 str)
+     - functionSpecifier        : __stdcall | __cdecl | ... (存储为 str)
+    """
 
     def __init__(self):
         self.specifiers: List[Tuple[str, Union[str, ir.Type]]] = []
@@ -98,7 +104,7 @@ def const_value(value: ir.Constant, name: str = None) -> TypedValue:
         name (str): 常量名 .
 
     Returns:
-        TypedValue:
+        TypedValue: 常量值的 TypedValue 封装. 右值, constant
     """
     return TypedValue(value, value.type, constant=True, name=name, lvalue_ptr=False)
 
@@ -116,7 +122,7 @@ class SymbolTable:
         self.table: List[Dict[str, Union[TypedValue, ir.Type, ir.Function]]] = [{}]
         self.current_level: int = 0
 
-    def get_item(self, item: str) -> Optional[Union[TypedValue, ir.Type, ir.Function]]:
+    def get_item(self, item: str) -> Optional[Union[TypedValue, ir.Type]]:
         """
         从符号表中获取元素.
 
@@ -143,9 +149,9 @@ class SymbolTable:
             Optional[str]: 如果出现了异常，返回具体错误信息，否则返回 None
         """
         if key in self.table[self.current_level]:
-            return Result[None](False, message=Constants.ERROR_TYPE_REDEFINITION)
+            return Result(False, message="redefinition")
         self.table[self.current_level][key] = value
-        return Result[None](True, value=None)
+        return Result(True, value=None)
 
     def exist(self, item: str) -> bool:
         """
@@ -199,6 +205,7 @@ class ElementNamedLiteralStructType(ir.LiteralStructType):
     def __init__(self, elems: List[ir.Type], names: List[str], packed=False):
         """
         *elems* is a sequence of types to be used as members.
+        *names* is a sequence of names to be used for name lookup.
         *packed* controls the use of packed layout.
         """
         ir.LiteralStructType.__init__(self, elems, packed)
@@ -206,76 +213,8 @@ class ElementNamedLiteralStructType(ir.LiteralStructType):
 
     def index(self, name: str) -> int:
         """
-        寻找名字对应的下标. 找不到时抛出异常
+        寻找名字对应的下标. 找不到时抛出异常.
         @param name: 名字
         @return: 下标
         """
         return self.names.index(name)
-
-
-class Structure:
-    """
-    结构体类
-    """
-
-    def __init__(self):
-        """
-        初始化 self.List.
-        """
-        # self.list 中每个 key 对应的元素为一个 {'Members': member_list, 'Type': ir.LiteralStructType(type_list)}。
-        self.list: Dict[str, Dict[str, Union[List[str], ir.LiteralStructType]]] = {}
-
-    def add_item(self, name: str, member_list: List[str], type_list: List[ir.Type]) -> Dict[str, str]:
-        """
-        添加一个元素.
-
-        Args:
-            name (str): 结构体名称
-            member_list (List[str]): 成员列表
-            type_list (List[ir.Type]): 类型列表
-
-        Returns:
-            Dict[str, str]: 成功则返回 {'status': 'success'}，失败 {'status': 'fail','reason': 具体原因码}
-        """
-        # TODO: 处理这个错误
-        if name in self.list:
-            result = {'status': 'fail', 'reason': Constants.ERROR_TYPE_REDEFINITION}
-            return result
-        newStruct = {'members': member_list, 'type': ir.LiteralStructType(type_list)}
-        self.list[name] = newStruct
-        return {'status': 'success'}
-
-    def get_member_type(self, name: str, member: str) -> Optional[str]:
-        """
-        获取成员类型.
-
-        Args:
-            name (str): 结构体名称
-            member (str): 结构体成员名
-
-        Returns:
-            str: 类型，不存在返回 None
-        """
-        if name not in self.list:
-            return None
-        structItem = self.list[name]
-        theIndex = structItem['members'].index(member)
-        theType = structItem['type'].elements[theIndex]
-        return theType
-
-    def get_member_index(self, name: str, member: str) -> Optional[int]:
-        """
-        获取成员编号.
-
-        Args:
-            name (str): 结构体名称
-            member (str): 结构体成员名
-
-        Returns:
-            int: 类型,不存在返回 None
-        """
-        if name not in self.list:
-            return None
-        structItem = self.list[name]['members']
-        theIndex = structItem.index(member)
-        return theIndex

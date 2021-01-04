@@ -3,9 +3,9 @@ from llvmlite import ir
 
 from typing import Dict, List, Union, Optional, Tuple, Any
 
-from generator.ErrorListener import SemanticError
-from generator.ErrorListener import SyntaxErrorListener
-from generator.SymbolTable import SymbolTable, Structure
+from generator.error_listener import SemanticError
+from generator.error_listener import SyntaxErrorListener
+from generator.symbol_table import SymbolTable, Structure
 from cparser.CCompilerLexer import CCompilerLexer
 from cparser.CCompilerParser import CCompilerParser
 from cparser.CCompilerVisitor import CCompilerVisitor

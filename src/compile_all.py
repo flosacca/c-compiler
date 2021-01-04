@@ -1,6 +1,6 @@
 import os
 
-from generator.Generator import generate
+from generator.generator import generate
 
 test_dir: str = 'test/' if os.path.exists('test/') else 'src/test/'
 
