@@ -36,12 +36,12 @@ class Visitor(CCompilerVisitor):
     生成器类，用于进行语义分析并且转化为LLVM
     """
 
-    def __init__(self):
+    def __init__(self, target_arch: str = 'x86_64-pc-linux-gnu'):
         super(CCompilerVisitor, self).__init__()
 
         # 控制llvm生成
         self.module: ir.Module = ir.Module()
-        self.module.triple = 'x86_64-pc-linux-gnu'  # llvm.Target.from_default_triple()
+        self.module.triple = target_arch  # llvm.Target.from_default_triple()
         # llvm.create_mcjit_compiler(backing_mod, target_machine)
         self.data_layout = 'e-m:e-i64:64-f80:128-n8:16:32:64-S128'
         self.module.data_layout = self.data_layout
@@ -1701,15 +1701,16 @@ class Visitor(CCompilerVisitor):
             f.write(repr(self.module))
 
 
-def generate(input_filename: str, output_filename: str):
+def generate(input_file: str, output_file: str, include_dirs: List[str] = None, target_arch: str = None,
+             macro_list: Dict[str, str] = None):
     """
     将C代码文件转成IR代码文件
-    :param input_filename: C代码文件
-    :param output_filename: IR代码文件
+    :param input_file: C代码文件
+    :param output_file: IR代码文件
+    :param include_dirs: 头文件搜寻路径
+    :param target_arch: 目标平台架构
     :return: 生成是否成功
     """
-
-    # TODO: 加入宏处理
     def as_pointer(self: ir.Type, addrspace=0):
         if isinstance(self, ir.VoidType):
             return int8.as_pointer(addrspace)
@@ -1718,12 +1719,13 @@ def generate(input_filename: str, output_filename: str):
     ir.Type.as_pointer = as_pointer
 
     # 加入宏处理
-    include_dirs = []
-    for path in ['.', './libc/include', './windows/include']:
-        include_dirs.append(f'./{path}')
-        include_dirs.append(f'./test/{path}')
-    macros = {'_WIN64': None}
-    precessed_text = preprocess(input_filename, include_dirs, macros)
+    includes = [os.getcwd()]
+    if include_dirs is not None:
+        includes += include_dirs
+    macros = dict()
+    if macro_list is not None:
+        macros.update(macro_list)
+    precessed_text = preprocess(input_file, include_dirs, macros)
     lexer = CCompilerLexer(InputStream(precessed_text))
     stream = CommonTokenStream(lexer)
     parser = CCompilerParser(stream)
@@ -1732,9 +1734,9 @@ def generate(input_filename: str, output_filename: str):
     parser.addErrorListener(errorListener)
 
     tree = parser.compilationUnit()
-    v = Visitor()
+    v = Visitor(target_arch=target_arch)
     # v.builders.append(None)
     v.visit(tree)
-    v.save(output_filename)
+    v.save(output_file)
 
 # del CCompilerParser
