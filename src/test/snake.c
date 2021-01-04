@@ -18,16 +18,9 @@ void Reset();
 void IsGameOver();
 void hidecursor();
 
-#define NONE	0
-#define UP		1
-#define DOWN	2
-#define LEFT	3
-#define RIGHT	4
-
-//enum Direction
-//{
-//	UP,DOWN,LEFT,RIGHT,NONE
-//};
+typedef enum Direction {
+	NONE, UP,DOWN,LEFT,RIGHT
+} Direction;
 
 struct Food {
     int x, y;
@@ -40,7 +33,7 @@ struct Snake {
 } snake;
 
 int isPrinted = 0, isGameOver = 0;
-int direction;
+Direction direction;
 const int FPS = 30;
 
 int main() {

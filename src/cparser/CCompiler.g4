@@ -272,6 +272,7 @@ typeSpecifier
     | typedefName             # typeSpecifier_2
     | typeSpecifier pointer   # typeSpecifier_3
     | structSpecifier         # typeSpecifier_4
+    | enumSpecifier           # typeSpecifier_5
     ;
 
 structSpecifier
@@ -291,6 +292,22 @@ structDeclaration
 structDeclaratorList
     :   declarator
     |   structDeclaratorList ',' declarator
+    ;
+
+enumSpecifier
+    :   'enum' Identifier? '{' enumeratorList '}'
+    |   'enum' Identifier? '{' enumeratorList ',' '}'
+    |   'enum' Identifier
+    ;
+
+enumeratorList
+    :   enumerator
+    |   enumeratorList ',' enumerator
+    ;
+
+enumerator
+    :   Identifier
+    |   Identifier '=' constantExpression
     ;
 
 primitiveType

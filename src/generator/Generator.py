@@ -221,6 +221,7 @@ class Visitor(CCompilerVisitor):
                 elif func_spec == "__stdcall":
                     parameter_list.calling_convention = "cc 65"
             return identifier2, typ2, parameter_list
+
         return create_func_ret
 
     def visitParameterTypeList(self, ctx: CCompilerParser.ParameterTypeListContext) -> ParameterList:
@@ -253,7 +254,8 @@ class Visitor(CCompilerVisitor):
         prev_list.append(param)
         return prev_list
 
-    def visitParameterDeclaration(self, ctx: CCompilerParser.ParameterDeclarationContext) -> Tuple[ir.Type, Optional[str]]:
+    def visitParameterDeclaration(self, ctx: CCompilerParser.ParameterDeclarationContext) -> Tuple[
+        ir.Type, Optional[str]]:
         """
         Parameter declaration
         语法规则: parameterDeclaration : declarationSpecifiers declarator ;
@@ -339,6 +341,7 @@ class Visitor(CCompilerVisitor):
                     typ1 = typ1.as_pointer()
                 identifier1, typ1, parameter_list1 = declarator_func(typ1, specifier)
                 return identifier1, typ1, parameter_list1
+
             return pointer_declarator
         return declarator_func
 
@@ -450,7 +453,6 @@ class Visitor(CCompilerVisitor):
             return self.visit(ctx.initializerList())
         else:
             return self.visit(ctx.assignmentExpression())
-
 
     def visitInitDeclarator(self, ctx: CCompilerParser.InitDeclaratorContext):
         """
@@ -598,6 +600,74 @@ class Visitor(CCompilerVisitor):
             base_type = base_type.as_pointer()
         return base_type
 
+    def visitEnumSpecifier(self, ctx: CCompilerParser.EnumSpecifierContext) -> ir.Type:
+        """
+        enumSpecifier
+            :   'enum' Identifier? '{' enumeratorList '}'
+            |   'enum' Identifier? '{' enumeratorList ',' '}'
+            |   'enum' Identifier
+            ;
+        """
+        identifier_ctx = ctx.Identifier()
+        if identifier_ctx is not None:
+            identifier = f'enum {identifier_ctx.getText()}'
+        else:
+            identifier = None
+
+        if ctx.enumeratorList():
+            enumerator_list = self.visit(ctx.enumeratorList())
+            current: int = 0
+            for (name, constant) in enumerator_list:
+                if constant is not None:
+                    constant: ir.Constant
+                    current = constant.constant
+                result = self.symbol_table.add_item(name, const_value(ir.Constant(size_t, current), name=name))
+                if not result.success:
+                    raise SemanticError("Symbol redefined: " + identifier, ctx)
+                current += 1
+            item = self.symbol_table.get_item(identifier)
+            if item is not None:
+                raise SemanticError("Symbol redefined: " + identifier)
+            self.symbol_table.add_item(identifier, size_t)
+            return size_t
+        else:
+            item = self.symbol_table.get_item(identifier)
+            if item is None:
+                raise SemanticError("Undefined identifier: " + identifier)
+            return item
+
+    def visitEnumeratorList(self, ctx: CCompilerParser.EnumeratorListContext) -> List[
+            Tuple[str, Optional[ir.Constant]]]:
+        """
+        enumeratorList
+            :   enumerator
+            |   enumeratorList ',' enumerator
+            ;
+        """
+        if ctx.enumeratorList():
+            enumerators = self.visit(ctx.enumeratorList())
+        else:
+            enumerators = []
+        enumerators.append(self.visit(ctx.enumerator()))
+        return enumerators
+
+    def visitEnumerator(self, ctx: CCompilerParser.EnumeratorContext) -> Tuple[str, Optional[ir.Constant]]:
+        """
+        enumerator
+            :   Identifier
+            |   Identifier '=' constantExpression
+            ;
+        """
+        identifier = ctx.Identifier().getText()
+        if ctx.constantExpression():
+            constant: TypedValue = self.visit(ctx.constantExpression())
+            if not self.is_ir_constant(constant) or not constant.type in int_types:
+                raise SemanticError(f"Enum initializer must be a constant integral: {constant.ir_value}", ctx)
+            constant: ir.Value = constant.ir_value
+        else:
+            constant: Optional[ir.Constant] = None
+        return identifier, constant
+
     def visitCompoundStatement(self, ctx: CCompilerParser.CompoundStatementContext) -> None:
         self.symbol_table.enter_scope()
         self.visitChildren(ctx)
@@ -716,7 +786,7 @@ class Visitor(CCompilerVisitor):
             return
         raise SemanticError('impossible')
 
-    def visitStructSpecifier_1(self, ctx:CCompilerParser.StructSpecifier_1Context) -> ElementNamedLiteralStructType:
+    def visitStructSpecifier_1(self, ctx: CCompilerParser.StructSpecifier_1Context) -> ElementNamedLiteralStructType:
         # structSpecifier : 'struct' Identifier? '{' structDeclarationList '}'
         identifier_ctx = ctx.Identifier()
         if identifier_ctx is not None:
@@ -742,7 +812,8 @@ class Visitor(CCompilerVisitor):
             raise SemanticError("Undefined identifier: " + identifier)
         return item
 
-    def visitStructDeclarationList(self, ctx: CCompilerParser.StructDeclarationListContext) -> List[Tuple[ir.Type, str]]:
+    def visitStructDeclarationList(self, ctx: CCompilerParser.StructDeclarationListContext) -> List[
+        Tuple[ir.Type, str]]:
         """
         语法规则：
             structDeclarationList
@@ -772,7 +843,7 @@ class Visitor(CCompilerVisitor):
             member_list.append((typ, identifier))
         return member_list
 
-    def visitStructDeclaratorList(self, ctx:CCompilerParser.StructDeclaratorListContext):
+    def visitStructDeclaratorList(self, ctx: CCompilerParser.StructDeclaratorListContext):
         """
         语法规则:
             structDeclaratorList
@@ -1611,7 +1682,7 @@ class Visitor(CCompilerVisitor):
             if v1.type == double:
                 raise SemanticError('Floating point number cannot shift bits.')
             result = self.builder.xor(rvalue1, tmp)
-        else:   # op == '|='
+        else:  # op == '|='
             tmp = self.convert_type(v3, v1.type, ctx=ctx)
             if v1.type == double:
                 raise SemanticError('Floating point number cannot shift bits.')
@@ -1640,11 +1711,13 @@ def generate(input_filename: str, output_filename: str):
     :param output_filename: IR代码文件
     :return: 生成是否成功
     """
+
     # TODO: 加入宏处理
     def as_pointer(self: ir.Type, addrspace=0):
         if isinstance(self, ir.VoidType):
             return int8.as_pointer(addrspace)
         return ir.PointerType(self, addrspace)
+
     ir.Type.as_pointer = as_pointer
 
     # 加入宏处理
