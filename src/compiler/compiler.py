@@ -396,7 +396,7 @@ class Visitor(CVisitor):
                             if specifiers.is_static():
                                 variable.linkage = "internal"
                             if initializer is not None:
-                                variable.initializer = self.create_initializer_list(typ, initializer, True)
+                                variable.initializer = self.create_initializer_list(typ, initializer, True, ctx)
                             else:
                                 variable.initializer = ir.Constant(typ, None)
                 else:
@@ -415,7 +415,7 @@ class Visitor(CVisitor):
                         raise SemanticError("Symbol redefined: " + identifier, ctx)
                     if initializer:
                         if not isinstance(initializer, TypedValue):
-                            value = self.create_initializer_list(typ, initializer, True)
+                            value = self.create_initializer_list(typ, initializer, True, ctx)
                         else:
                             value = self.convert_type(initializer, typ, ctx=ctx)
                         self.builder.store(value, variable)
@@ -971,7 +971,7 @@ class Visitor(CVisitor):
 
     def create_initializer_list(self, target_type: ir.Type,
                                 initializer_list: Union[TypedValue, List[Union[TypedValue, list]]],
-                                need_constant: bool) -> ir.Value:
+                                need_constant: bool, ctx=None) -> ir.Value:
         """
         根据所需要的类型，创建对应的 literal_array, literal_struct, ir.Constant, ir.Value.
         """
@@ -982,7 +982,7 @@ class Visitor(CVisitor):
             if len(initializer_list) > target_type.count:
                 raise SemanticError("Invalid initializer: element count not match", ctx)
             for initializer in initializer_list:
-                array_elements.append(self.create_initializer_list(element_type, initializer, need_constant))
+                array_elements.append(self.create_initializer_list(element_type, initializer, need_constant, ctx))
             if len(initializer_list) < target_type.count:
                 # 用 0 补足剩下的空间
                 zero_initializer = ir.Constant(element_type, None)
@@ -996,7 +996,7 @@ class Visitor(CVisitor):
             for i in range(len(initializer_list)):
                 element_type = target_type.elements[i]
                 initializer = initializer_list[i]
-                struct_elements.append(self.create_initializer_list(element_type, initializer, need_constant))
+                struct_elements.append(self.create_initializer_list(element_type, initializer, need_constant, ctx))
             for i in range(len(initializer_list), len(target_type.elements)):
                 element_type = target_type.elements[i]
                 struct_elements.append(ir.Constant(element_type, None))
@@ -1597,7 +1597,7 @@ class Visitor(CVisitor):
         typed_value_true = self.visit(ctx.expression())
         if isinstance(typed_value_true.type, ir.ArrayType):
             typed_value_true = self.decay(typed_value_true)
-        value_true = typed_value_true.ir_value
+        value_true = self.load_lvalue(typed_value_true)
         self.builder.branch(block_end)
         block_true = self.builder.basic_block
 
@@ -1605,7 +1605,7 @@ class Visitor(CVisitor):
         typed_value_false = self.visit(ctx.conditionalExpression())
         if isinstance(typed_value_false.type, ir.ArrayType):
             typed_value_false = self.decay(typed_value_false)
-        value_false = typed_value_false.ir_value
+        value_false = self.load_lvalue(typed_value_false)
         self.builder.branch(block_end)
         block_false = self.builder.basic_block
 
